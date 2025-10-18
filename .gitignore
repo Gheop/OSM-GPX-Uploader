@@ -210,3 +210,4 @@ __marimo__/
 osm_config.json
 osm_token.txt
 traces/
+traces
