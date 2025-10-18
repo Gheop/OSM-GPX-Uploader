@@ -88,13 +88,16 @@ class TestGPXParsing:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".gpx", delete=False) as f:
             f.write(gpx_content)
             f.flush()
-            timestamp = uploader.extract_gpx_timestamp(Path(f.name))
-            os.unlink(f.name)
+            temp_path = f.name
 
-        assert timestamp is not None
-        assert timestamp.year == 2023
-        assert timestamp.month == 11
-        assert timestamp.day == 22
+        try:
+            timestamp = uploader.extract_gpx_timestamp(Path(temp_path))
+            assert timestamp is not None
+            assert timestamp.year == 2023
+            assert timestamp.month == 11
+            assert timestamp.day == 22
+        finally:
+            os.unlink(temp_path)
 
     def test_extract_gpx_timestamp_from_waypoints(self):
         """Test l'extraction depuis les waypoints"""
@@ -108,11 +111,14 @@ class TestGPXParsing:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".gpx", delete=False) as f:
             f.write(gpx_content)
             f.flush()
-            timestamp = uploader.extract_gpx_timestamp(Path(f.name))
-            os.unlink(f.name)
+            temp_path = f.name
 
-        assert timestamp is not None
-        assert timestamp.year == 2024
+        try:
+            timestamp = uploader.extract_gpx_timestamp(Path(temp_path))
+            assert timestamp is not None
+            assert timestamp.year == 2024
+        finally:
+            os.unlink(temp_path)
 
     def test_extract_gpx_timestamp_no_time(self):
         """Test le comportement sans timestamp"""
@@ -124,20 +130,26 @@ class TestGPXParsing:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".gpx", delete=False) as f:
             f.write(gpx_content)
             f.flush()
-            timestamp = uploader.extract_gpx_timestamp(Path(f.name))
-            os.unlink(f.name)
+            temp_path = f.name
 
-        assert timestamp is None
+        try:
+            timestamp = uploader.extract_gpx_timestamp(Path(temp_path))
+            assert timestamp is None
+        finally:
+            os.unlink(temp_path)
 
     def test_extract_gpx_timestamp_invalid_file(self):
         """Test avec un fichier invalide"""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".gpx", delete=False) as f:
             f.write("invalid xml content")
             f.flush()
-            timestamp = uploader.extract_gpx_timestamp(Path(f.name))
-            os.unlink(f.name)
+            temp_path = f.name
 
-        assert timestamp is None
+        try:
+            timestamp = uploader.extract_gpx_timestamp(Path(temp_path))
+            assert timestamp is None
+        finally:
+            os.unlink(temp_path)
 
     def test_format_trace_name(self):
         """Test le formatage du nom de trace"""
