@@ -5,6 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![OpenStreetMap](https://img.shields.io/badge/OpenStreetMap-API%20v0.6-7ebc6f.svg)](https://wiki.openstreetmap.org/wiki/API_v0.6)
+[![Tests](https://github.com/Gheop/OSM-GPX-Uploader/actions/workflows/tests.yml/badge.svg)](https://github.com/Gheop/OSM-GPX-Uploader/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/Gheop/OSM-GPX-Uploader/branch/main/graph/badge.svg)](https://codecov.io/gh/Gheop/OSM-GPX-Uploader)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 ## ✨ Features
 
@@ -185,6 +188,43 @@ If the GPX file doesn't contain a timestamp, the script uses the file's modifica
 ## 🤝 Contributing
 
 Contributions are welcome! Here's how you can help:
+
+### Development setup
+
+1. **Fork and clone the repository**:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/OSM-GPX-Uploader.git
+   cd OSM-GPX-Uploader
+   ```
+
+2. **Install development dependencies**:
+   ```bash
+   pip install -r requirements-dev.txt
+   ```
+
+3. **Run tests**:
+   ```bash
+   # Run all tests
+   pytest
+
+   # Run with coverage
+   pytest --cov=. --cov-report=html
+
+   # Run specific test file
+   pytest tests/test_osm_gpx_uploader.py -v
+   ```
+
+4. **Check code style**:
+   ```bash
+   # Check formatting
+   black --check .
+
+   # Auto-format code
+   black .
+
+   # Lint code
+   flake8 .
+   ```
 
 ### Report a bug
 
