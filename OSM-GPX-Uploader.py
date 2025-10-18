@@ -151,7 +151,6 @@ def get_authorization_code(client_id):
     auth_url = f"{OSM_WEB_URL}/oauth2/authorize?{urlencode(params)}"
     
     print("\n🔐 Autorisation nécessaire...")
-    print(f"🔍 DEBUG: Scopes demandés = read_gpx write_gpx")
     print(f"Un navigateur va s'ouvrir pour vous connecter à OpenStreetMap.")
     print(f"Si le navigateur ne s'ouvre pas, copiez cette URL :\n{auth_url}\n")
     
@@ -290,29 +289,20 @@ def get_existing_traces(access_token):
     try:
         url = f"{OSM_API_URL}/api/0.6/user/gpx_files.json"
         headers = {'Authorization': f'Bearer {access_token}'}
-        
-        print(f"🔍 DEBUG: Requête GET vers {url}")
         response = requests.get(url, headers=headers)
-        
-        print(f"🔍 DEBUG: Status code = {response.status_code}")
-        
         if response.status_code != 200:
             print(f"⚠️  Erreur lors de la récupération des traces: {response.status_code}")
-            print(f"🔍 DEBUG: Réponse = {response.text[:500]}")
             return set()
         
         # Parser la réponse JSON
         data = response.json()
-        print(f"🔍 DEBUG: Réponse JSON complète = {json.dumps(data, indent=2, ensure_ascii=False)[:1000]}")
         
         # L'API retourne "traces" et non "gpx_files"
         traces_list = data.get('traces', data.get('gpx_files', []))
-        print(f"🔍 DEBUG: Nombre de traces trouvées = {len(traces_list)}")
         
         trace_names = set()
         
         for gpx_file in traces_list:
-            print(f"🔍 DEBUG: Trace = ID:{gpx_file.get('id')}, Description:{gpx_file.get('description')}")
             # Extraire le format YYYYMMDD - hh:mm de la description
             if 'description' in gpx_file and gpx_file['description']:
                 desc = gpx_file['description']
@@ -320,14 +310,13 @@ def get_existing_traces(access_token):
                 match = re.search(r'\d{8} - \d{2}:\d{2}', desc)
                 if match:
                     trace_names.add(match.group())
-                    print(f"🔍 DEBUG: ✅ Trace existante détectée = {match.group()}")
+                    
         
         return trace_names
         
     except Exception as e:
         print(f"⚠️  Erreur lors de la récupération des traces: {e}")
         import traceback
-        print(f"🔍 DEBUG: Traceback = {traceback.format_exc()}")
         return set()
 
 
@@ -338,9 +327,6 @@ def upload_gpx(access_token, gpx_file, trace_name, config):
         headers = {'Authorization': f'Bearer {access_token}'}
         
         description = f"{trace_name} - {config['description']}"
-        print(f"🔍 DEBUG: Description = {description}")
-        print(f"🔍 DEBUG: Tags = {config['tags']}")
-        print(f"🔍 DEBUG: Visibility = {config['visibility']}")
         
         with open(gpx_file, 'rb') as f:
             files = {'file': (gpx_file.name, f, 'application/gpx+xml')}
@@ -351,10 +337,10 @@ def upload_gpx(access_token, gpx_file, trace_name, config):
                 'visibility': config['visibility']
             }
             
-            print(f"🔍 DEBUG: POST vers {url}")
+            /Gheop/ POST vers {url}")
             response = requests.post(url, files=files, data=data, headers=headers)
         
-        print(f"🔍 DEBUG: Status code upload = {response.status_code}")
+        
         
         if response.status_code in [200, 201]:
             trace_id = response.text.strip()
@@ -369,7 +355,7 @@ def upload_gpx(access_token, gpx_file, trace_name, config):
     except Exception as e:
         print(f"  ❌ Erreur lors de l'upload: {e}")
         import traceback
-        print(f"🔍 DEBUG: Traceback = {traceback.format_exc()}")
+        
         return False
 
 
