@@ -29,7 +29,7 @@
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/OSM-GPX-Uploader.git
+   git clone https://github.com/Gheop/OSM-GPX-Uploader.git
    cd OSM-GPX-Uploader
    ```
 
@@ -193,7 +193,7 @@ Contributions are welcome! Here's how you can help:
 
 1. **Fork and clone the repository**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/OSM-GPX-Uploader.git
+   git clone https://github.com/Gheop/OSM-GPX-Uploader.git
    cd OSM-GPX-Uploader
    ```
 
@@ -228,7 +228,7 @@ Contributions are welcome! Here's how you can help:
 
 ### Report a bug
 
-1. Check that the bug isn't already reported in [Issues](https://github.com/YOUR_USERNAME/OSM-GPX-Uploader/issues)
+1. Check that the bug isn't already reported in [Issues](https://github.com/Gheop/OSM-GPX-Uploader/issues)
 2. Create a new issue with:
    - A clear description of the problem
    - Steps to reproduce it
@@ -286,7 +286,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/OSM-GPX-Uploader/issues)
+- **Issues**: [GitHub Issues](https://github.com/Gheop/OSM-GPX-Uploader/issues)
 - **OSM Wiki**: [API v0.6](https://wiki.openstreetmap.org/wiki/API_v0.6)
 - **OSM Forum**: [Community Forum](https://community.openstreetmap.org/)
 
