@@ -139,7 +139,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
 
 def get_authorization_code(client_id):
     """Launch OAuth 2.0 flow to obtain an authorization code"""
-    global auth_code
+    global auth_code  # noqa: F824
     
     # Authorization request parameters
     params = {
