@@ -264,7 +264,9 @@ class TestOAuthFlow:
 
     def test_callback_handler_success(self):
         """Test le callback handler avec succès"""
-        with patch.object(uploader.CallbackHandler, "__init__", lambda x, y, z, w: None):
+        with patch.object(
+            uploader.CallbackHandler, "__init__", lambda x, y, z, w: None
+        ):
             handler = uploader.CallbackHandler(None, None, None)
             handler.path = "/callback?code=test_code_123"
             handler.send_response = Mock()
@@ -280,7 +282,9 @@ class TestOAuthFlow:
     def test_callback_handler_error(self):
         """Test le callback handler sans code"""
         uploader.auth_code = None
-        with patch.object(uploader.CallbackHandler, "__init__", lambda x, y, z, w: None):
+        with patch.object(
+            uploader.CallbackHandler, "__init__", lambda x, y, z, w: None
+        ):
             handler = uploader.CallbackHandler(None, None, None)
             handler.path = "/callback?error=access_denied"
             handler.send_response = Mock()
@@ -294,7 +298,9 @@ class TestOAuthFlow:
 
     def test_callback_handler_log_message(self):
         """Test que log_message ne fait rien"""
-        with patch.object(uploader.CallbackHandler, "__init__", lambda x, y, z, w: None):
+        with patch.object(
+            uploader.CallbackHandler, "__init__", lambda x, y, z, w: None
+        ):
             handler = uploader.CallbackHandler(None, None, None)
             # Should not raise any exception
             handler.log_message("test format", "arg1", "arg2")
