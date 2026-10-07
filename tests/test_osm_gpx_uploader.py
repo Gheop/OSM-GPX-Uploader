@@ -1495,7 +1495,8 @@ class TestTimestampCache:
         files = write_gpx_files(tmp_path, 1)
         uploader.extract_timestamps_cached(files)
         files[0].write_text(files[0].read_text().replace("14:00:00", "15:30:00"))
-        os.utime(files[0], ns=(0, files[0].stat().st_mtime_ns + 1))
+        # 1 s later: NTFS stores times in 100 ns steps, a 1 ns bump is lost
+        os.utime(files[0], ns=(0, files[0].stat().st_mtime_ns + 1_000_000_000))
         [(timestamp, _)] = uploader.extract_timestamps_cached(files)
         assert (timestamp.hour, timestamp.minute) == (15, 30)
 
