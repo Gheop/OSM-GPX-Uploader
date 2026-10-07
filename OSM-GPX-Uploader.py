@@ -61,6 +61,23 @@ DEFAULT_CONFIG = {
 # ============================================================================
 
 
+def private_opener(path, flags):
+    """Opener for files holding a secret: readable by their owner only"""
+    fd = os.open(path, flags, 0o600)
+    if hasattr(os, "fchmod"):
+        # The mode above only applies to new files: tighten existing ones too
+        os.fchmod(fd, 0o600)
+    return fd
+
+
+def restrict_to_owner(path):
+    """Make a secret file written by an older version readable by its owner only"""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # Not ours to change, or no such permission model: keep going
+
+
 def load_or_create_config():
     """Load or create the configuration file"""
     config_path = Path(CONFIG_FILE)
@@ -68,6 +85,7 @@ def load_or_create_config():
     # If file exists, load it
     if config_path.exists():
         try:
+            restrict_to_owner(config_path)
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
 
@@ -113,7 +131,7 @@ def load_or_create_config():
 
     # Save configuration
     try:
-        with open(config_path, "w", encoding="utf-8") as f:
+        with open(config_path, "w", encoding="utf-8", opener=private_opener) as f:
             json.dump(config, indent=2, fp=f)
         print(f"\n✅ Configuration saved in {CONFIG_FILE}")
         print("   You can edit this file directly if needed.\n")
@@ -204,6 +222,7 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
     # Check if we already have a saved token
     if auth_code_param is None and os.path.exists(TOKEN_FILE):
         try:
+            restrict_to_owner(TOKEN_FILE)
             with open(TOKEN_FILE, "r") as f:
                 token = f.read().strip()
         except OSError:
@@ -272,7 +291,7 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
     access_token = token_data["access_token"]
 
     # Save token
-    with open(TOKEN_FILE, "w") as f:
+    with open(TOKEN_FILE, "w", opener=private_opener) as f:
         f.write(access_token)
 
     print("✅ Access token obtained and saved")

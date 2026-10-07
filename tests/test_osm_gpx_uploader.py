@@ -26,6 +26,14 @@ with patch("webbrowser.open"), patch("http.server.HTTPServer"):
     spec.loader.exec_module(uploader)
 
 
+@pytest.fixture(autouse=True)
+def isolated_cwd(tmp_path, monkeypatch):
+    """Chaque test tourne dans un répertoire vide : le script lit et écrit sa
+    config, son token et son cache dans le répertoire courant, qui peut
+    contenir les vrais secrets du développeur"""
+    monkeypatch.chdir(tmp_path)
+
+
 class TestConfiguration:
     """Tests pour la gestion de la configuration"""
 
@@ -747,6 +755,51 @@ class TestTokenCheck:
         mock_post.return_value.json.return_value = {"access_token": "new"}
         assert uploader.get_access_token("id", "secret") == "new"
         mock_get.assert_not_called()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="permissions POSIX")
+class TestSecretFilePermissions:
+    """Tests que le token et la config ne sont lisibles que par leur propriétaire"""
+
+    @patch("requests.post")
+    def test_new_token_file_is_private(self, mock_post, tmp_path):
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.json.return_value = {"access_token": "new"}
+        uploader.get_access_token("id", "secret", auth_code_param="code")
+        assert (tmp_path / uploader.TOKEN_FILE).stat().st_mode & 0o777 == 0o600
+
+    @patch("requests.post")
+    def test_rewritten_token_file_becomes_private(self, mock_post, tmp_path):
+        token_file = tmp_path / uploader.TOKEN_FILE
+        token_file.write_text("old")
+        token_file.chmod(0o644)
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.json.return_value = {"access_token": "new"}
+        uploader.get_access_token("id", "secret", auth_code_param="code")
+        assert token_file.read_text() == "new"
+        assert token_file.stat().st_mode & 0o777 == 0o600
+
+    @patch("requests.get", return_value=Mock(status_code=200))
+    def test_existing_token_file_is_tightened_on_read(self, mock_get, tmp_path):
+        token_file = tmp_path / uploader.TOKEN_FILE
+        token_file.write_text("token")
+        token_file.chmod(0o644)
+        assert uploader.get_access_token("id", "secret") == "token"
+        assert token_file.stat().st_mode & 0o777 == 0o600
+
+    @patch("builtins.input", side_effect=["id", "secret", "", "", ""])
+    def test_new_config_file_is_private(self, mock_input, tmp_path):
+        uploader.load_or_create_config()
+        config_file = tmp_path / uploader.CONFIG_FILE
+        assert json.loads(config_file.read_text())["client_secret"] == "secret"
+        assert config_file.stat().st_mode & 0o777 == 0o600
+
+    def test_existing_config_file_is_tightened_on_read(self, tmp_path):
+        config_file = tmp_path / uploader.CONFIG_FILE
+        config_file.write_text('{"client_id": "id", "client_secret": "secret"}')
+        config_file.chmod(0o644)
+        assert uploader.load_or_create_config()["client_id"] == "id"
+        assert config_file.stat().st_mode & 0o777 == 0o600
 
 
 class TestNetworkTimeouts:
