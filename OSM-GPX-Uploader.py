@@ -20,6 +20,8 @@ import threading
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
+# Custom User-Agent to avoid being blocked by OSM's CDN (Varnish)
+USER_AGENT = "OSM-GPX-Uploader/1.0 (https://github.com/Gheop/OSM-GPX-Uploader)"
 OSM_WEB_URL = "https://www.openstreetmap.org"  # For OAuth
 OSM_API_URL = "https://api.openstreetmap.org"  # For GPX API
 REDIRECT_URI = "http://127.0.0.1:8000/callback"  # Do not modify
@@ -189,7 +191,10 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
             with open(TOKEN_FILE, "r") as f:
                 token = f.read().strip()
                 # Test if token is valid
-                headers = {"Authorization": f"Bearer {token}"}
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": USER_AGENT,
+                }
                 response = requests.get(
                     f"{OSM_API_URL}/api/0.6/user/details.json", headers=headers
                 )
@@ -218,7 +223,10 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
     }
 
     response = requests.post(
-        token_url, data=data, auth=HTTPBasicAuth(client_id, client_secret)
+        token_url,
+        data=data,
+        auth=HTTPBasicAuth(client_id, client_secret),
+        headers={"User-Agent": USER_AGENT},
     )
 
     if response.status_code != 200:
@@ -295,7 +303,10 @@ def get_existing_traces(access_token):
     """Retrieve list of user's existing traces"""
     try:
         url = f"{OSM_API_URL}/api/0.6/user/gpx_files.json"
-        headers = {"Authorization": f"Bearer {access_token}"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "User-Agent": USER_AGENT,
+        }
         response = requests.get(url, headers=headers)
 
         if response.status_code != 200:
@@ -330,7 +341,10 @@ def upload_gpx(access_token, gpx_file, trace_name, config):
     """Upload a GPX file to OpenStreetMap"""
     try:
         url = f"{OSM_API_URL}/api/0.6/gpx/create"
-        headers = {"Authorization": f"Bearer {access_token}"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "User-Agent": USER_AGENT,
+        }
 
         description = f"{trace_name} - {config['description']}"
 
