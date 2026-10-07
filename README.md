@@ -35,7 +35,7 @@
 
 2. **Install dependencies**:
    ```bash
-   pip install requests
+   pip install -r requirements.txt
    ```
 
 3. **Create an OAuth application on OpenStreetMap**:
@@ -302,4 +302,5 @@ Made with ❤️ for the OpenStreetMap community
 
 | Version | Date       | Changes                            |
 |---------|------------|------------------------------------|
+| 1.0.1   | 2026-10-07 | Install dependencies from requirements.txt |
 | 1.0.0   | 2026-10-07 | Document the timestamp cache file  |
