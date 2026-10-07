@@ -197,7 +197,7 @@ Check that you have enabled **"Read user GPS traces"** in your OAuth application
 
 ### Script doesn't detect duplicates
 
-The script compares dates/times in descriptions. If you uploaded traces with another tool, they won't be detected as duplicates.
+The script compares dates/times in descriptions. If you uploaded traces with another tool, they won't be detected as duplicates. See [How duplicates are detected](#how-duplicates-are-detected) for the other limits.
 
 ### No timestamp in GPX
 
@@ -282,8 +282,17 @@ The script automatically names your traces in `YYYYMMDD - hh:mm` format in the d
 
 This format allows:
 - ✅ Easy chronological sorting
-- ✅ Reliable duplicate detection
+- ✅ Duplicate detection (see below)
 - ✅ Quick identification of your traces
+
+### How duplicates are detected
+
+Before uploading, the script downloads the list of your traces and reads the `YYYYMMDD - hh:mm` found in each description. A GPX file whose oldest time gives a name already in that list is skipped. This has limits:
+
+- Two different traces that start within the same minute get the same name: only the first one is uploaded.
+- If you edit a trace description on OpenStreetMap and remove its `YYYYMMDD - hh:mm`, the next run uploads that file again.
+- Traces uploaded with another tool are not recognised unless their description contains the same date/time format.
+- If the list of your traces cannot be retrieved (network error, OpenStreetMap unavailable), the script stops without uploading anything rather than risk duplicates.
 
 ## 🔒 Security
 
@@ -314,9 +323,10 @@ Made with ❤️ for the OpenStreetMap community
 
 ## README changelog
 
-| Version | Date       | Changes                                         |
-|---------|------------|-------------------------------------------------|
-| 1.1.0   | 2026-10-07 | Add files location section for user directories |
-| 1.0.2   | 2026-10-07 | Require Python 3.10 or higher                   |
-| 1.0.1   | 2026-10-07 | Install dependencies from requirements.txt      |
-| 1.0.0   | 2026-10-07 | Document the timestamp cache file               |
+| Version | Date       | Changes                                               |
+|---------|------------|-------------------------------------------------------|
+| 1.2.0   | 2026-10-07 | Document how duplicates are detected and their limits |
+| 1.1.0   | 2026-10-07 | Add files location section for user directories       |
+| 1.0.2   | 2026-10-07 | Require Python 3.10 or higher                         |
+| 1.0.1   | 2026-10-07 | Install dependencies from requirements.txt            |
+| 1.0.0   | 2026-10-07 | Document the timestamp cache file                     |
