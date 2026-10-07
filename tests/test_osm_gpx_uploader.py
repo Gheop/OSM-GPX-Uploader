@@ -362,9 +362,10 @@ class TestMainWorkflow:
         
         mock_upload.assert_not_called()
     
+    @patch.object(uploader, 'load_or_create_config', return_value={'client_id': 'id', 'client_secret': 'secret'})
     @patch('pathlib.Path.exists', return_value=False)
     @patch('sys.argv', ['script.py', 'invalid_dir'])
-    def test_main_directory_not_found(self, mock_exists):
+    def test_main_directory_not_found(self, mock_exists, mock_config):
         """Test répertoire non trouvé"""
         with pytest.raises(SystemExit):
             uploader.main()
