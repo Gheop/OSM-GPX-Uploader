@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import requests
 import webbrowser
-from urllib.parse import urlencode, parse_qs
+from urllib.parse import urlencode, parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -197,7 +197,7 @@ def get_authorization_code(client_id):
     print(f"If the browser doesn't open, copy this URL:\n{auth_url}\n")
 
     # Start local server to receive callback
-    server = HTTPServer(("127.0.0.1", 8000), CallbackHandler)
+    server = HTTPServer(("127.0.0.1", urlparse(REDIRECT_URI).port), CallbackHandler)
     server_thread = threading.Thread(target=server.handle_request)
     server_thread.daemon = True
     server_thread.start()

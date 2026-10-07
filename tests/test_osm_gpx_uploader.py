@@ -802,6 +802,67 @@ class TestSecretFilePermissions:
         assert config_file.stat().st_mode & 0o777 == 0o600
 
 
+def free_port():
+    """Port local libre, pour ne pas dépendre du 8000 de REDIRECT_URI"""
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def browser_visiting(query):
+    """Faux navigateur : suit la redirection d'OSM vers le callback local"""
+    import urllib.error
+    import urllib.request
+
+    def open_browser(auth_url):
+        url = f"{uploader.REDIRECT_URI}?{query}"
+        try:
+            urllib.request.urlopen(url, timeout=5).close()
+        except urllib.error.HTTPError:
+            pass  # Réponse d'erreur du callback : le test regarde le résultat
+
+    return open_browser
+
+
+class TestAuthorizationFlow:
+    """Tests du flux OAuth avec le vrai serveur de callback local"""
+
+    @pytest.fixture(autouse=True)
+    def callback_on_free_port(self, monkeypatch):
+        port = free_port()
+        monkeypatch.setattr(
+            uploader, "REDIRECT_URI", f"http://127.0.0.1:{port}/callback"
+        )
+        monkeypatch.setattr(uploader, "auth_code", None)
+        # The module is loaded with HTTPServer mocked (see top of file)
+        import http.server
+
+        monkeypatch.setattr(uploader, "HTTPServer", http.server.HTTPServer)
+
+    def test_code_from_callback_is_returned(self):
+        with patch("webbrowser.open", side_effect=browser_visiting("code=abc")):
+            assert uploader.get_authorization_code("client") == "abc"
+
+    def test_authorize_url_requests_gpx_scopes(self):
+        with patch(
+            "webbrowser.open", side_effect=browser_visiting("code=abc")
+        ) as browser:
+            uploader.get_authorization_code("client")
+        auth_url = browser.call_args.args[0]
+        assert auth_url.startswith(f"{uploader.OSM_WEB_URL}/oauth2/authorize?")
+        query = uploader.parse_qs(uploader.urlparse(auth_url).query)
+        assert query["scope"] == ["read_gpx write_gpx"]
+        assert query["redirect_uri"] == [uploader.REDIRECT_URI]
+        assert query["client_id"] == ["client"]
+
+    def test_callback_without_code_exits(self):
+        with patch("webbrowser.open", side_effect=browser_visiting("other=1")):
+            with pytest.raises(SystemExit):
+                uploader.get_authorization_code("client")
+
+
 class TestNetworkTimeouts:
     """Tests que chaque appel réseau a un délai maximal"""
 
