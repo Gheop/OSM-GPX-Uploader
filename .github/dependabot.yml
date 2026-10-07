@@ -1,0 +1,21 @@
+# Monthly update PRs, one per ecosystem. Actions pinned by SHA (codecov) get
+# their SHA and version comment updated too.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    # Requirements are lower bounds: only open a PR when a release falls
+    # outside them (e.g. black 27), not for every patch release
+    versioning-strategy: increase-if-necessary
+    groups:
+      python:
+        patterns: ["*"]
