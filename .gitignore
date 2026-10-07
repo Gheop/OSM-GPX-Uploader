@@ -209,6 +209,8 @@ __marimo__/
 
 osm_config.json
 osm_token.txt
+osm_gpx_cache.json
+osm_gpx_cache.json.tmp
 traces/
 traces
 bench/golden.local.json

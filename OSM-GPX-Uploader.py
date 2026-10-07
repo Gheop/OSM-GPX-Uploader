@@ -38,6 +38,9 @@ MAX_WORKERS = 8
 # Configuration files
 CONFIG_FILE = "osm_config.json"
 TOKEN_FILE = "osm_token.txt"
+CACHE_FILE = "osm_gpx_cache.json"
+# Bump when extract_gpx_timestamp changes: older cached results are dropped
+CACHE_VERSION = 1
 
 # Default configuration
 DEFAULT_CONFIG = {
@@ -330,6 +333,75 @@ def extract_all_timestamps(gpx_files):
     return [extract_with_messages(gpx_file) for gpx_file in gpx_files]
 
 
+def load_timestamp_cache():
+    """Load cached extraction results, keyed by absolute file path"""
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        if cache.get("version") == CACHE_VERSION:
+            return cache["files"]
+    except (OSError, ValueError, KeyError, AttributeError):
+        pass  # Missing or unreadable cache: rebuild it
+    return {}
+
+
+def save_timestamp_cache(entries):
+    """Write the cache atomically, dropping files that no longer exist"""
+    entries = {path: entry for path, entry in entries.items() if os.path.exists(path)}
+    tmp_file = f"{CACHE_FILE}.tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump({"version": CACHE_VERSION, "files": entries}, f)
+        os.replace(tmp_file, CACHE_FILE)
+    except OSError as e:
+        print(f"⚠️  Unable to save cache: {e}")
+
+
+def extract_timestamps_cached(gpx_files):
+    """Extract timestamps, reusing results for files unchanged since last run
+
+    A file counts as unchanged when its size and modification time match.
+    Returns a list of (timestamp, messages) in the order of gpx_files.
+    """
+    cache = load_timestamp_cache()
+    keys = []
+    missing = []
+    for gpx_file in gpx_files:
+        stat = gpx_file.stat()
+        key = str(gpx_file.resolve())
+        keys.append(key)
+        entry = cache.get(key)
+        if (
+            not isinstance(entry, dict)
+            or entry.get("size") != stat.st_size
+            or entry.get("mtime_ns") != stat.st_mtime_ns
+        ):
+            missing.append((gpx_file, key, stat))
+
+    extracted = extract_all_timestamps([gpx_file for gpx_file, _, _ in missing])
+    for (gpx_file, key, stat), (timestamp, messages) in zip(missing, extracted):
+        cache[key] = {
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "timestamp": timestamp.isoformat() if timestamp else None,
+            "messages": messages,
+        }
+
+    if missing:
+        save_timestamp_cache(cache)
+
+    results = []
+    for key in keys:
+        timestamp = cache[key]["timestamp"]
+        results.append(
+            (
+                datetime.fromisoformat(timestamp) if timestamp else None,
+                cache[key]["messages"],
+            )
+        )
+    return results
+
+
 def format_trace_name(dt):
     """Format trace name according to YYYYMMDD - hh:mm format"""
     return dt.strftime("%Y%m%d - %H:%M")
@@ -453,7 +525,7 @@ def main():
     errors = 0
 
     gpx_files = sorted(gpx_files)
-    extracted = extract_all_timestamps(gpx_files)
+    extracted = extract_timestamps_cached(gpx_files)
 
     for gpx_file, (timestamp, messages) in zip(gpx_files, extracted):
         print(f"📄 {gpx_file.name}")

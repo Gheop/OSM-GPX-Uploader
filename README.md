@@ -163,6 +163,10 @@ Add tags separated by commas to organize your traces:
 "tags": "survey,bike,paris"
 ```
 
+### `osm_gpx_cache.json` file
+
+The script stores the date/time it extracted from each GPX file in `osm_gpx_cache.json`, so the next runs only read new or modified files. A file is read again when its size or modification time changes. Deleting the cache is always safe: the next run rebuilds it.
+
 ## 🔧 Troubleshooting
 
 ### Token is invalid every time
@@ -293,3 +297,9 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ---
 
 Made with ❤️ for the OpenStreetMap community
+
+## README changelog
+
+| Version | Date       | Changes                            |
+|---------|------------|------------------------------------|
+| 1.0.0   | 2026-10-07 | Document the timestamp cache file  |

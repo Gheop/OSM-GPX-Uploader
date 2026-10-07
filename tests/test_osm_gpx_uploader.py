@@ -502,5 +502,78 @@ class TestParallelExtraction:
         assert broken_block.startswith("  ⚠️  Error extracting timestamp")
         assert "Skipped (already present): 20" in output
 
+
+class TestTimestampCache:
+    """Tests pour le cache des timestamps entre deux exécutions"""
+
+    def test_second_run_reuses_cache(self, tmp_path, monkeypatch):
+        """Test qu'un fichier inchangé n'est pas reparsé"""
+        monkeypatch.chdir(tmp_path)
+        files = write_gpx_files(tmp_path, 2)
+        first = uploader.extract_timestamps_cached(files)
+        with patch.object(uploader, 'extract_gpx_timestamp', side_effect=AssertionError):
+            second = uploader.extract_timestamps_cached(files)
+        assert second == first
+        assert [ts.minute for ts, _ in second] == [0, 1]
+
+    def test_modified_file_is_extracted_again(self, tmp_path, monkeypatch):
+        """Test qu'un fichier modifié invalide son entrée"""
+        monkeypatch.chdir(tmp_path)
+        files = write_gpx_files(tmp_path, 1)
+        uploader.extract_timestamps_cached(files)
+        files[0].write_text(files[0].read_text().replace("14:00:00", "15:30:00"))
+        os.utime(files[0], ns=(0, files[0].stat().st_mtime_ns + 1))
+        [(timestamp, _)] = uploader.extract_timestamps_cached(files)
+        assert (timestamp.hour, timestamp.minute) == (15, 30)
+
+    def test_failed_extraction_keeps_its_message(self, tmp_path, monkeypatch):
+        """Test qu'un échec en cache réaffiche le même avertissement"""
+        monkeypatch.chdir(tmp_path)
+        broken = tmp_path / "broken.gpx"
+        broken.write_text("not xml")
+        first = uploader.extract_timestamps_cached([broken])
+        second = uploader.extract_timestamps_cached([broken])
+        assert second == first
+        assert second[0][0] is None
+        assert "Error extracting timestamp" in second[0][1]
+
+    @pytest.mark.parametrize("content", [
+        "not json",
+        '["a list"]',
+        '{"version": 0, "files": {}}',
+        '{"version": 1, "files": {"/x.gpx": "not a dict"}}',
+    ])
+    def test_unusable_cache_is_rebuilt(self, tmp_path, monkeypatch, content):
+        """Test qu'un cache corrompu ou d'une autre version est ignoré"""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / uploader.CACHE_FILE).write_text(content)
+        files = write_gpx_files(tmp_path, 1)
+        [(timestamp, _)] = uploader.extract_timestamps_cached(files)
+        assert timestamp.minute == 0
+        cache = json.loads((tmp_path / uploader.CACHE_FILE).read_text())
+        assert cache["version"] == uploader.CACHE_VERSION
+
+    def test_deleted_files_are_pruned(self, tmp_path, monkeypatch):
+        """Test que les fichiers disparus sortent du cache"""
+        monkeypatch.chdir(tmp_path)
+        files = write_gpx_files(tmp_path, 2)
+        uploader.extract_timestamps_cached(files)
+        files[0].unlink()
+        new_file = tmp_path / "new.gpx"
+        new_file.write_text(files[1].read_text())
+        uploader.extract_timestamps_cached([files[1], new_file])
+        cached = json.loads((tmp_path / uploader.CACHE_FILE).read_text())["files"]
+        assert str(files[0].resolve()) not in cached
+        assert len(cached) == 2
+
+    def test_unwritable_cache_does_not_stop_the_run(self, tmp_path, monkeypatch, capsys):
+        """Test qu'une erreur d'écriture du cache est signalée sans arrêter"""
+        monkeypatch.chdir(tmp_path)
+        files = write_gpx_files(tmp_path, 1)
+        with patch.object(uploader.os, 'replace', side_effect=OSError("read-only")):
+            [(timestamp, _)] = uploader.extract_timestamps_cached(files)
+        assert timestamp.minute == 0
+        assert "Unable to save cache" in capsys.readouterr().out
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
