@@ -6,27 +6,31 @@ dominates noise on laptops where the governor cannot be pinned.
 
 Both checkouts run under this checkout's harness.
 
-Usage: python bench/compare.py BASELINE_ROOT CANDIDATE_ROOT GPX_DIR [RUNS] [CPUS]
+Usage: python bench/compare.py [--warm] BASELINE_ROOT CANDIDATE_ROOT GPX_DIR [RUNS] [CPUS]
 A single root measures that checkout alone (writes nothing).
 CPUS is a taskset list, e.g. 12 or 12-19.
+--warm keeps one working directory per checkout across runs, so a cache
+written by the script survives (repeated runs); default is a fresh one each run.
 """
 import json
+import os
 import statistics
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HARNESS = Path(__file__).resolve().parent / "run_scan.py"
 
 
-def run_once(root, gpx_dir, cpu):
+def run_once(root, gpx_dir, cpu, env=None):
     # time writes "<wall seconds> <max RSS KB> <user seconds> <sys seconds>"
     # to stderr. Max RSS covers the largest single process, not the sum of
     # workers: measure the total with bench/mem_peak.sh
     cmd = ["/usr/bin/time", "-f", "%e %M %U %S", "taskset", "-c", cpu,
            sys.executable, str(HARNESS), str(Path(root) / "OSM-GPX-Uploader.py"), gpx_dir]
     proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                          text=True, check=True)
+                          text=True, check=True, env=env)
     wall, rss, user, system = proc.stderr.strip().splitlines()[-1].split()
     return float(wall), int(rss), float(user) + float(system)
 
@@ -44,19 +48,26 @@ def summarize(samples):
 
 
 def main():
-    args = sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a != "--warm"]
     roots = [a for a in args if Path(a, "OSM-GPX-Uploader.py").exists()]
     gpx_dir, *rest = args[len(roots):]
     runs = int(rest[0]) if rest else 15
     cpu = rest[1] if len(rest) > 1 else "12"
 
-    for root in roots:  # warmup: page cache and bytecode cache
+    envs = {root: None for root in roots}
+    if "--warm" in sys.argv:
+        workdirs = tempfile.TemporaryDirectory()
+        for index, root in enumerate(roots):
+            os.mkdir(Path(workdirs.name, str(index)))
+            envs[root] = {**os.environ, "BENCH_WORKDIR": str(Path(workdirs.name, str(index)))}
+
+    for root in roots:  # warmup: page cache, bytecode cache, script cache
         for _ in range(2):
-            run_once(root, gpx_dir, cpu)
+            run_once(root, gpx_dir, cpu, envs[root])
     samples = {root: [] for root in roots}
     for _ in range(runs):
         for root in roots:
-            samples[root].append(run_once(root, gpx_dir, cpu))
+            samples[root].append(run_once(root, gpx_dir, cpu, envs[root]))
 
     results = {root: summarize(s) for root, s in samples.items()}
     print(json.dumps(results, indent=1))

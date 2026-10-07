@@ -8,6 +8,9 @@ can re-import it.
 
 Usage: python bench/run_scan.py SCRIPT GPX_DIR [--verify]
   --verify  check that each file maps to the name in golden.local.json
+
+BENCH_WORKDIR=DIR keeps the working directory (config, token and any cache
+the script writes) across runs instead of starting from an empty one.
 """
 import io
 import json
@@ -53,8 +56,8 @@ def main():
     output = io.StringIO() if "--verify" in sys.argv else sys.stdout
 
     # config and token are read from the working directory
-    with tempfile.TemporaryDirectory() as workdir:
-        os.chdir(workdir)
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chdir(os.environ.get("BENCH_WORKDIR") or tmp)
         Path("osm_config.json").write_text(json.dumps(config))
         Path("osm_token.txt").write_text("token")
         with patch.object(requests, "get", side_effect=fake_get(expected.values())), \
