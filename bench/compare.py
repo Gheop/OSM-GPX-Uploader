@@ -58,7 +58,11 @@ def main():
         delta = cand["median_s"] / base["median_s"] - 1
         noise = max(base["stdev_s"] / base["median_s"], cand["stdev_s"] / cand["median_s"])
         rss = cand["rss_max_kb"] / base["rss_max_kb"] - 1
+        # per-pair ratios: both runs of a pair share the same thermal state
+        ratios = sorted(c[0] / b[0] for b, c in zip(*(samples[r] for r in roots)))
+        q1, q3 = statistics.quantiles(ratios, n=4)[0], statistics.quantiles(ratios, n=4)[2]
         print(f"median {delta:+.1%} (noise {noise:.1%}), RSS {rss:+.1%}")
+        print(f"paired ratio median {statistics.median(ratios) - 1:+.1%}, IQR [{q1 - 1:+.1%}, {q3 - 1:+.1%}]")
 
 
 if __name__ == "__main__":
