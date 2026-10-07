@@ -413,15 +413,41 @@ class TestTraceManagement:
         mock_response.status_code = 403
         mock_get.return_value = mock_response
 
-        traces = uploader.get_existing_traces("test_token")
-        assert len(traces) == 0
+        assert uploader.get_existing_traces("test_token") is None
 
     @patch("requests.get")
     def test_get_existing_traces_exception(self, mock_get):
         """Test exception lors de la récupération"""
         mock_get.side_effect = Exception("Network error")
-        traces = uploader.get_existing_traces("test_token")
-        assert len(traces) == 0
+        assert uploader.get_existing_traces("test_token") is None
+
+    @patch("requests.get")
+    def test_get_existing_traces_unexpected_format(self, mock_get):
+        """Test qu'une réponse sans liste de traces n'est pas lue comme vide"""
+        mock_get.return_value = Mock(status_code=200)
+        mock_get.return_value.json.return_value = {"error": "maintenance"}
+        assert uploader.get_existing_traces("test_token") is None
+
+    @patch.object(uploader, "extract_timestamps_cached")
+    @patch.object(uploader, "upload_gpx")
+    @patch.object(uploader, "get_existing_traces", return_value=None)
+    @patch.object(uploader, "get_access_token", return_value="token")
+    @patch.object(
+        uploader,
+        "load_or_create_config",
+        return_value={"client_id": "id", "client_secret": "secret"},
+    )
+    def test_main_stops_when_traces_unavailable(
+        self, mock_config, mock_token, mock_traces, mock_upload, mock_extract, tmp_path
+    ):
+        """Test qu'aucun fichier n'est uploadé si la liste des traces manque"""
+        (tmp_path / "trace.gpx").write_text("<gpx/>")
+        with patch("sys.argv", ["script.py", str(tmp_path)]):
+            with pytest.raises(SystemExit) as exit_info:
+                uploader.main()
+        assert exit_info.value.code == 1
+        mock_upload.assert_not_called()
+        mock_extract.assert_not_called()
 
     @patch("requests.post")
     @patch("builtins.open", new_callable=mock_open, read_data=b"gpx content")

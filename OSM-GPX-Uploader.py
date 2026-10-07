@@ -421,7 +421,11 @@ def format_trace_name(dt):
 
 
 def get_existing_traces(access_token):
-    """Retrieve list of user's existing traces"""
+    """Retrieve list of user's existing traces
+
+    Returns None when the list could not be retrieved: an empty set would
+    mean "nothing uploaded yet" and every file would be uploaded again.
+    """
     try:
         url = f"{OSM_API_URL}/api/0.6/user/gpx_files.json"
         headers = {
@@ -431,14 +435,17 @@ def get_existing_traces(access_token):
         response = requests.get(url, headers=headers)
 
         if response.status_code != 200:
-            print(f"⚠️  Error retrieving traces: {response.status_code}")
-            return set()
+            print(f"❌ Error retrieving traces: {response.status_code}")
+            return None
 
         # Parse JSON response
         data = response.json()
 
         # API returns "traces" not "gpx_files"
-        traces_list = data.get("traces", data.get("gpx_files", []))
+        traces_list = data.get("traces", data.get("gpx_files"))
+        if not isinstance(traces_list, list):
+            print("❌ Error retrieving traces: unexpected response format")
+            return None
 
         trace_names = set()
 
@@ -454,8 +461,8 @@ def get_existing_traces(access_token):
         return trace_names
 
     except Exception as e:
-        print(f"⚠️  Error retrieving traces: {e}")
-        return set()
+        print(f"❌ Error retrieving traces: {e}")
+        return None
 
 
 def upload_gpx(access_token, gpx_file, trace_name, config):
@@ -530,6 +537,9 @@ def main():
     # Retrieve existing traces
     print("\n🔍 Retrieving existing traces...")
     existing_traces = get_existing_traces(access_token)
+    if existing_traces is None:
+        print("   Nothing uploaded: without this list, duplicates cannot be detected.")
+        sys.exit(1)
     print(f"   {len(existing_traces)} existing trace(s)\n")
 
     # Process each file
