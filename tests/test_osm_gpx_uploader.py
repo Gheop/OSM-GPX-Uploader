@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests unitaires pour OSM-GPX-Uploader"""
+
 import pytest
 import json
 import re

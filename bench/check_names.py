@@ -5,6 +5,7 @@ Usage:
   python bench/check_names.py GPX_DIR --record   # write the golden file
   python bench/check_names.py GPX_DIR            # compare against it
 """
+
 import importlib.util
 import json
 import sys
@@ -14,7 +15,6 @@ from io import StringIO
 from pathlib import Path
 
 from run_scan import GOLDEN
-
 
 ROOT = Path(__file__).resolve().parent.parent
 

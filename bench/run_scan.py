@@ -12,6 +12,7 @@ Usage: python bench/run_scan.py SCRIPT GPX_DIR [--verify]
 BENCH_WORKDIR=DIR keeps the working directory (config, token and any cache
 the script writes) across runs instead of starting from an empty one.
 """
+
 import io
 import json
 import os
