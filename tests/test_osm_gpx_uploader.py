@@ -887,11 +887,38 @@ class TestAuthorizationFlow:
         assert query["code_challenge"] == [expected.decode()]
         assert query["code_challenge_method"] == ["S256"]
 
-    def test_no_callback_exits_at_deadline(self, monkeypatch):
+    def test_refused_authorization_is_reported(self, capsys):
+        with patch(
+            "webbrowser.open", side_effect=browser_visiting("error=access_denied")
+        ):
+            with pytest.raises(SystemExit):
+                uploader.get_authorization_code("client")
+        output = capsys.readouterr().out
+        assert "Authorization not granted on OpenStreetMap: access_denied" in output
+        assert "Timeout" not in output
+
+    # HTTPServer sets SO_REUSEADDR, which on Windows lets a second socket bind
+    # a port that is already listening
+    @pytest.mark.skipif(os.name == "nt", reason="SO_REUSEADDR semantics on Windows")
+    def test_busy_port_is_reported(self, capsys):
+        import socket
+
+        port = uploader.urlparse(uploader.REDIRECT_URI).port
+        with socket.socket() as busy:
+            busy.bind(("127.0.0.1", port))
+            busy.listen()
+            with patch("webbrowser.open") as browser:
+                with pytest.raises(SystemExit):
+                    uploader.get_authorization_code("client")
+        browser.assert_not_called()
+        assert f"Cannot listen on 127.0.0.1:{port}" in capsys.readouterr().out
+
+    def test_no_callback_exits_at_deadline(self, monkeypatch, capsys):
         monkeypatch.setattr(uploader, "CALLBACK_TIMEOUT", 1)
         with patch("webbrowser.open"):
             with pytest.raises(SystemExit):
                 uploader.get_authorization_code("client")
+        assert "Timeout: no authorization received" in capsys.readouterr().out
 
     @patch("requests.post")
     def test_verifier_is_sent_with_the_code(self, mock_post):

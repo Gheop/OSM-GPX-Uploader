@@ -157,8 +157,9 @@ CALLBACK_TIMEOUT = 120
 class CallbackHandler(BaseHTTPRequestHandler):
     """Handle OAuth callback
 
-    The server carries expected_state, and receives auth_code and
-    callback_done once the callback for this authorization arrives.
+    The server carries expected_state, and receives auth_code (or
+    auth_error) and callback_done once the callback for this authorization
+    arrives.
     """
 
     # Seconds before dropping a client that connects but sends nothing
@@ -185,7 +186,9 @@ class CallbackHandler(BaseHTTPRequestHandler):
                 b"<p>You can close this window.</p>",
             )
         else:
-            self.respond(400, b"<h1>Error</h1><p>No code received.</p>")
+            # OSM sends error=access_denied when the user refuses
+            self.server.auth_error = query.get("error", ["no code received"])[0]
+            self.respond(400, b"<h1>Error</h1><p>Authorization not granted.</p>")
 
     def respond(self, status, body):
         self.send_response(status)
@@ -232,9 +235,16 @@ def get_authorization_code(client_id):
     print(f"If the browser doesn't open, copy this URL:\n{auth_url}\n")
 
     # Start local server to receive callback
-    server = HTTPServer(("127.0.0.1", urlparse(REDIRECT_URI).port), CallbackHandler)
+    port = urlparse(REDIRECT_URI).port
+    try:
+        server = HTTPServer(("127.0.0.1", port), CallbackHandler)
+    except OSError as e:
+        print(f"❌ Cannot listen on 127.0.0.1:{port} for the OSM callback: {e}")
+        print(f"   Close the program using port {port}, then run the script again.")
+        sys.exit(1)
     server.expected_state = state
     server.auth_code = None
+    server.auth_error = None
     server.callback_done = False
     # handle_request() returns after 1 s without a request, to check the deadline
     server.timeout = 1
@@ -255,6 +265,9 @@ def get_authorization_code(client_id):
     server_thread.join(timeout=CALLBACK_TIMEOUT + CallbackHandler.timeout)
     server.server_close()
 
+    if server.auth_error:
+        print(f"❌ Authorization not granted on OpenStreetMap: {server.auth_error}")
+        sys.exit(1)
     if server.auth_code is None:
         print("❌ Timeout: no authorization received")
         sys.exit(1)
