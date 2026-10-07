@@ -2,7 +2,7 @@
 
 🗺️ Python script to automatically upload your GPX traces to OpenStreetMap with duplicate detection.
 
-[![Python Version](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![OpenStreetMap](https://img.shields.io/badge/OpenStreetMap-API%20v0.6-7ebc6f.svg)](https://wiki.openstreetmap.org/wiki/API_v0.6)
 [![Tests](https://github.com/Gheop/OSM-GPX-Uploader/actions/workflows/tests.yml/badge.svg)](https://github.com/Gheop/OSM-GPX-Uploader/actions/workflows/tests.yml)
@@ -21,7 +21,7 @@
 
 ## 📋 Prerequisites
 
-- Python 3.7 or higher
+- Python 3.10 or higher
 - An [OpenStreetMap](https://www.openstreetmap.org/) account
 - Python libraries: `requests`
 
@@ -300,7 +300,8 @@ Made with ❤️ for the OpenStreetMap community
 
 ## README changelog
 
-| Version | Date       | Changes                            |
-|---------|------------|------------------------------------|
+| Version | Date       | Changes                                    |
+|---------|------------|--------------------------------------------|
+| 1.0.2   | 2026-10-07 | Require Python 3.10 or higher              |
 | 1.0.1   | 2026-10-07 | Install dependencies from requirements.txt |
-| 1.0.0   | 2026-10-07 | Document the timestamp cache file  |
+| 1.0.0   | 2026-10-07 | Document the timestamp cache file          |
