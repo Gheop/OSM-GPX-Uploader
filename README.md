@@ -2,7 +2,7 @@
 
 🗺️ Python script to automatically upload your GPX traces to OpenStreetMap with duplicate detection.
 
-[![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![OpenStreetMap](https://img.shields.io/badge/OpenStreetMap-API%20v0.6-7ebc6f.svg)](https://wiki.openstreetmap.org/wiki/API_v0.6)
 [![Tests](https://github.com/Gheop/OSM-GPX-Uploader/actions/workflows/tests.yml/badge.svg)](https://github.com/Gheop/OSM-GPX-Uploader/actions/workflows/tests.yml)
@@ -21,7 +21,7 @@
 
 ## 📋 Prerequisites
 
-- Python 3.10 or higher
+- Python 3.11 or higher
 - An [OpenStreetMap](https://www.openstreetmap.org/) account
 - Python libraries: `requests`
 
@@ -326,6 +326,7 @@ Made with ❤️ for the OpenStreetMap community
 
 | Version | Date       | Changes                                               |
 |---------|------------|-------------------------------------------------------|
+| 1.2.2   | 2026-10-07 | Require Python 3.11 or higher                         |
 | 1.2.1   | 2026-10-07 | Explain when authorization is asked again             |
 | 1.2.0   | 2026-10-07 | Document how duplicates are detected and their limits |
 | 1.1.0   | 2026-10-07 | Add files location section for user directories       |
