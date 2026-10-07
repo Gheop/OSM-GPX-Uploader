@@ -1,6 +1,4 @@
--r requirements.txt
-pytest>=7.0.0
-pytest-cov>=4.0.0
+-r requirements-test.txt
 flake8>=6.0.0
 black>=26,<27
 pre-commit>=4.0.0
