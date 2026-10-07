@@ -431,6 +431,84 @@ def write_gpx_files(directory, count):
     return sorted(directory.glob("*.gpx"))
 
 
+
+def extract_from(tmp_path, gpx_content):
+    """Écrit gpx_content dans un fichier et en extrait le timestamp"""
+    gpx_file = tmp_path / "trace.gpx"
+    gpx_file.write_text(gpx_content)
+    return uploader.extract_gpx_timestamp(gpx_file)
+
+
+class TestTimestampSelection:
+    """Tests pour l'espace de noms GPX et le choix de l'heure la plus ancienne"""
+
+    def test_gpx_1_0_track_points(self, tmp_path):
+        """Test qu'un GPX 1.0 est lu au lieu de retomber sur la date du fichier"""
+        timestamp = extract_from(tmp_path, (
+            '<gpx xmlns="http://www.topografix.com/GPX/1/0" version="1.0">'
+            '<trk><trkseg><trkpt lat="0" lon="0"><time>2023-11-22T14:04:00Z</time></trkpt>'
+            '</trkseg></trk></gpx>'
+        ))
+        assert uploader.format_trace_name(timestamp) == "20231122 - 14:04"
+
+    def test_gpx_1_0_document_time(self, tmp_path):
+        """Test que le <time> direct sous <gpx> (GPX 1.0) compte"""
+        timestamp = extract_from(tmp_path, (
+            '<gpx xmlns="http://www.topografix.com/GPX/1/0" version="1.0">'
+            '<time>2023-11-22T13:00:00Z</time>'
+            '<trk><trkseg><trkpt lat="0" lon="0"><time>2023-11-22T14:04:00Z</time></trkpt>'
+            '</trkseg></trk></gpx>'
+        ))
+        assert uploader.format_trace_name(timestamp) == "20231122 - 13:00"
+
+    def test_gpx_without_namespace(self, tmp_path):
+        """Test un GPX sans espace de noms"""
+        timestamp = extract_from(tmp_path, (
+            '<gpx version="1.1"><wpt lat="0" lon="0"><time>2023-11-22T14:04:00Z</time></wpt></gpx>'
+        ))
+        assert uploader.format_trace_name(timestamp) == "20231122 - 14:04"
+
+    def test_oldest_is_chronological_across_offsets(self, tmp_path):
+        """Test que 15:30+02:00 (13:30 UTC) est plus ancien que 14:00Z"""
+        timestamp = extract_from(tmp_path, (
+            '<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1"><trk><trkseg>'
+            '<trkpt lat="0" lon="0"><time>2023-11-22T14:00:00Z</time></trkpt>'
+            '<trkpt lat="0" lon="0"><time>2023-11-22T15:30:00+02:00</time></trkpt>'
+            '</trkseg></trk></gpx>'
+        ))
+        # Le nom garde l'heure telle qu'écrite dans le fichier
+        assert uploader.format_trace_name(timestamp) == "20231122 - 15:30"
+
+    def test_oldest_with_mixed_precision(self, tmp_path):
+        """Test que 14:00:00.500Z est plus récent que 14:00:00Z"""
+        timestamp = extract_from(tmp_path, (
+            '<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">'
+            '<metadata><time>2023-11-22T14:00:00.500Z</time></metadata><trk><trkseg>'
+            '<trkpt lat="0" lon="0"><time>2023-11-22T14:00:00Z</time></trkpt>'
+            '</trkseg></trk></gpx>'
+        ))
+        assert timestamp.microsecond == 0
+
+    def test_time_without_offset_is_utc(self, tmp_path):
+        """Test qu'une heure sans fuseau se compare comme de l'UTC"""
+        timestamp = extract_from(tmp_path, (
+            '<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1"><trk><trkseg>'
+            '<trkpt lat="0" lon="0"><time>2023-11-22T14:00:00</time></trkpt>'
+            '<trkpt lat="0" lon="0"><time>2023-11-22T14:30:00+01:00</time></trkpt>'
+            '</trkseg></trk></gpx>'
+        ))
+        assert uploader.format_trace_name(timestamp) == "20231122 - 14:30"
+
+    def test_invalid_time_is_ignored(self, tmp_path):
+        """Test qu'une heure illisible n'empêche pas de lire les autres"""
+        timestamp = extract_from(tmp_path, (
+            '<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1"><trk><trkseg>'
+            '<trkpt lat="0" lon="0"><time>0000-garbage</time></trkpt>'
+            '<trkpt lat="0" lon="0"><time>2023-11-22T14:04:00Z</time></trkpt>'
+            '</trkseg></trk></gpx>'
+        ))
+        assert uploader.format_trace_name(timestamp) == "20231122 - 14:04"
+
 class TestParallelExtraction:
     """Tests pour l'extraction des timestamps en processus séparés"""
 
@@ -541,13 +619,16 @@ class TestTimestampCache:
         "not json",
         '["a list"]',
         '{"version": 0, "files": {}}',
-        '{"version": 1, "files": {"/x.gpx": "not a dict"}}',
+        '{"version": CURRENT, "files": {"FILE": "not a dict"}}',
     ])
     def test_unusable_cache_is_rebuilt(self, tmp_path, monkeypatch, content):
         """Test qu'un cache corrompu ou d'une autre version est ignoré"""
         monkeypatch.chdir(tmp_path)
-        (tmp_path / uploader.CACHE_FILE).write_text(content)
         files = write_gpx_files(tmp_path, 1)
+        (tmp_path / uploader.CACHE_FILE).write_text(
+            content.replace("CURRENT", str(uploader.CACHE_VERSION))
+            .replace("FILE", str(files[0].resolve()))
+        )
         [(timestamp, _)] = uploader.extract_timestamps_cached(files)
         assert timestamp.minute == 0
         cache = json.loads((tmp_path / uploader.CACHE_FILE).read_text())

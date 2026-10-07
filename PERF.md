@@ -117,14 +117,21 @@ avec une graine fixe, puisque les traces réelles sont personnelles) :
   relatif plus fort).
 - `bench/mem_peak.sh` : alerte si la mémoire totale à froid dépasse 250 Mo.
 
-## Observations hors périmètre
+## Corrections faites ensuite
 
-Relevées pendant le travail, non corrigées car ce sont des changements de
-comportement :
+Deux bugs relevés pendant ce travail ont été corrigés à part, hors
+optimisation :
 
-- Un GPX 1.0 (`http://www.topografix.com/GPX/1/0`) n'est jamais lu : la racine
-  se termine par `gpx`, donc l'espace de noms 1.1 est conservé, aucun `<time>`
-  n'est trouvé et le script retombe sur la date de modification du fichier.
-- Le timestamp le plus ancien est choisi par tri de chaînes. Avec des
-  décalages horaires différents dans un même fichier, ce n'est pas
-  chronologique.
+- Un GPX 1.0 (`http://www.topografix.com/GPX/1/0`) n'était jamais lu : le
+  script gardait l'espace de noms 1.1 et retombait sur la date de modification
+  du fichier. Il utilise maintenant l'espace de noms de la racine, et lit aussi
+  le `<time>` direct sous `<gpx>` propre au GPX 1.0.
+- L'heure la plus ancienne était choisie par tri de chaînes. Elle est
+  maintenant comparée en instants UTC (heure sans fuseau = UTC, comme le
+  prévoit GPX) ; une heure illisible est ignorée au lieu d'invalider le
+  fichier.
+
+Sur les 431 traces de référence, aucun nom ne change : rien n'est réuploadé.
+Coût à froid : temps mural +3,6 % IQR [-3,8 ; +7,5] (non significatif), CPU
+total ≈ +14 % (conversion des 732 000 heures), mémoire +2 %. `CACHE_VERSION`
+passe à 2, ce qui relit tous les fichiers une fois.

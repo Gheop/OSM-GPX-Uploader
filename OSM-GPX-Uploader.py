@@ -13,7 +13,7 @@ from contextlib import redirect_stdout
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import requests
 import webbrowser
@@ -40,7 +40,7 @@ CONFIG_FILE = "osm_config.json"
 TOKEN_FILE = "osm_token.txt"
 CACHE_FILE = "osm_gpx_cache.json"
 # Bump when extract_gpx_timestamp changes: older cached results are dropped
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 # Default configuration
 DEFAULT_CONFIG = {
@@ -262,44 +262,57 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
 # ============================================================================
 
 
+def parse_gpx_time(text):
+    """Parse a GPX time, or return None if it is not a valid ISO 8601 date"""
+    try:
+        return datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def utc_sort_key(dt):
+    """Comparable instant for a GPX time; GPX times without offset are UTC"""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def extract_gpx_timestamp(gpx_file):
     """Extract the oldest timestamp from a GPX file"""
     try:
         tree = ET.parse(gpx_file)
         root = tree.getroot()
 
-        # GPX Namespace
-        ns = {"gpx": "http://www.topografix.com/GPX/1/1"}
-        if not root.tag.endswith("gpx"):
-            # Extract namespace from root
-            if "}" in root.tag:
-                ns_uri = root.tag.split("}")[0].strip("{")
-                ns = {"gpx": ns_uri}
+        # Use the document's own namespace: GPX 1.0 and 1.1 differ
+        ns_uri = root.tag[1:].split("}")[0] if root.tag.startswith("{") else ""
 
-        timestamps = []
+        def q(name):
+            return f"{{{ns_uri}}}{name}" if ns_uri else name
+
+        texts = []
 
         # Search in trkpt (track points)
-        for time_elem in root.findall(".//gpx:trkpt/gpx:time", ns):
+        for time_elem in root.findall(f".//{q('trkpt')}/{q('time')}"):
             if time_elem.text:
-                timestamps.append(time_elem.text)
+                texts.append(time_elem.text)
 
         # Search in wpt (waypoints)
-        for time_elem in root.findall(".//gpx:wpt/gpx:time", ns):
+        for time_elem in root.findall(f".//{q('wpt')}/{q('time')}"):
             if time_elem.text:
-                timestamps.append(time_elem.text)
+                texts.append(time_elem.text)
 
-        # Search in metadata
-        metadata_time = root.find(".//gpx:metadata/gpx:time", ns)
-        if metadata_time is not None and metadata_time.text:
-            timestamps.append(metadata_time.text)
+        # Search in metadata (GPX 1.1), or directly under <gpx> (GPX 1.0)
+        for document_time in (
+            root.find(f".//{q('metadata')}/{q('time')}"),
+            root.find(q("time")),
+        ):
+            if document_time is not None and document_time.text:
+                texts.append(document_time.text)
 
+        timestamps = [dt for dt in map(parse_gpx_time, texts) if dt is not None]
         if not timestamps:
             return None
 
-        # Take the oldest timestamp
-        timestamps.sort()
-        dt = datetime.fromisoformat(timestamps[0].replace("Z", "+00:00"))
-        return dt
+        # Oldest instant, compared across time zones; it keeps its own offset
+        return min(timestamps, key=utc_sort_key)
 
     except Exception as e:
         print(f"  ⚠️  Error extracting timestamp: {e}")
