@@ -116,6 +116,34 @@ class TestConfiguration:
         assert config["tags"] == "mytag"
 
 
+class TestVisibilityValidation:
+    """Tests : une visibilité refusée par OSM est détectée au démarrage"""
+
+    def write_config(self, tmp_path, **values):
+        config = {"client_id": "id", "client_secret": "secret", **values}
+        (tmp_path / uploader.CONFIG_FILE).write_text(json.dumps(config))
+
+    @pytest.mark.parametrize("visibility", uploader.VISIBILITIES)
+    def test_valid_visibility_is_accepted(self, tmp_path, visibility):
+        self.write_config(tmp_path, visibility=visibility)
+        assert uploader.load_or_create_config()["visibility"] == visibility
+
+    @pytest.mark.parametrize("values", [{"visibility": "publc"}, {}])
+    def test_invalid_or_missing_visibility_stops(self, tmp_path, capsys, values):
+        self.write_config(tmp_path, **values)
+        with pytest.raises(SystemExit):
+            uploader.load_or_create_config()
+        output = capsys.readouterr().out
+        assert "Invalid visibility" in output
+        assert "public, identifiable, trackable, private" in output
+
+    @patch("builtins.input", side_effect=["id", "secret", "publc", "trackable", "", ""])
+    def test_prompt_asks_again_until_valid(self, mock_input, tmp_path, capsys):
+        config = uploader.load_or_create_config()
+        assert config["visibility"] == "trackable"
+        assert "Use one of: public, identifiable" in capsys.readouterr().out
+
+
 class TestGPXParsing:
     """Tests pour l'extraction de données des fichiers GPX"""
 
@@ -840,7 +868,9 @@ class TestSecretFilePermissions:
 
     def test_existing_config_file_is_tightened_on_read(self, tmp_path):
         config_file = tmp_path / uploader.CONFIG_FILE
-        config_file.write_text('{"client_id": "id", "client_secret": "secret"}')
+        config_file.write_text(
+            '{"client_id": "id", "client_secret": "secret", "visibility": "private"}'
+        )
         config_file.chmod(0o644)
         assert uploader.load_or_create_config()["client_id"] == "id"
         assert config_file.stat().st_mode & 0o777 == 0o600

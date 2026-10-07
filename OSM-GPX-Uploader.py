@@ -51,6 +51,9 @@ CACHE_FILE = "osm_gpx_cache.json"
 CACHE_VERSION = 2
 
 # Default configuration
+# Values accepted by the OSM API for a trace
+VISIBILITIES = ("public", "identifiable", "trackable", "private")
+
 DEFAULT_CONFIG = {
     "client_id": "",
     "client_secret": "",
@@ -82,24 +85,51 @@ def restrict_to_owner(path):
         pass  # Not ours to change, or no such permission model: keep going
 
 
+def read_config(config_path):
+    """Return the saved configuration, or None if it must be created again"""
+    try:
+        restrict_to_owner(config_path)
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except Exception as e:
+        print(f"⚠️  Error reading config: {e}\n")
+        return None
+
+    # Check that credentials are present
+    if not (config.get("client_id") and config.get("client_secret")):
+        print("⚠️  Incomplete configuration detected\n")
+        return None
+
+    # A bad value would make every upload fail, one by one
+    if config.get("visibility") not in VISIBILITIES:
+        print(
+            f"❌ Invalid visibility {config.get('visibility')!r} "
+            f"in {CONFIG_FILE}: use one of {', '.join(VISIBILITIES)}"
+        )
+        sys.exit(1)
+    return config
+
+
+def ask_visibility(default):
+    """Ask for a trace visibility until the answer is one OSM accepts"""
+    while True:
+        visibility = input(f"Visibility [{default}]: ").strip()
+        if not visibility:
+            return default
+        if visibility in VISIBILITIES:
+            return visibility
+        print(f"   Use one of: {', '.join(VISIBILITIES)}")
+
+
 def load_or_create_config():
     """Load or create the configuration file"""
     config_path = Path(CONFIG_FILE)
 
     # If file exists, load it
     if config_path.exists():
-        try:
-            restrict_to_owner(config_path)
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-
-            # Check that credentials are present
-            if config.get("client_id") and config.get("client_secret"):
-                return config
-            else:
-                print("⚠️  Incomplete configuration detected\n")
-        except Exception as e:
-            print(f"⚠️  Error reading config: {e}\n")
+        config = read_config(config_path)
+        if config:
+            return config
 
     # Create a new configuration
     print("=" * 70)
@@ -121,9 +151,7 @@ def load_or_create_config():
 
     print("\n📝 Trace parameters (press Enter to keep default values)")
 
-    visibility = input(f"Visibility [{config['visibility']}]: ").strip()
-    if visibility:
-        config["visibility"] = visibility
+    config["visibility"] = ask_visibility(config["visibility"])
 
     description = input(f"Description [{config['description']}]: ").strip()
     if description:
