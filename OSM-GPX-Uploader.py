@@ -392,38 +392,35 @@ def utc_sort_key(dt):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def collect_time_texts(root):
+    """Texts of the <time> elements of track points, waypoints and document"""
+    # Use the document's own namespace: GPX 1.0 and 1.1 differ
+    ns_uri = root.tag[1:].split("}")[0] if root.tag.startswith("{") else ""
+
+    def q(name):
+        return f"{{{ns_uri}}}{name}" if ns_uri else name
+
+    time_elems = (
+        root.findall(f".//{q('trkpt')}/{q('time')}")
+        + root.findall(f".//{q('wpt')}/{q('time')}")
+        # Document time: in metadata (GPX 1.1), or directly under <gpx> (GPX 1.0)
+        + [
+            elem
+            for elem in (
+                root.find(f".//{q('metadata')}/{q('time')}"),
+                root.find(q("time")),
+            )
+            if elem is not None
+        ]
+    )
+    return [elem.text for elem in time_elems if elem.text]
+
+
 def extract_gpx_timestamp(gpx_file):
     """Extract the oldest timestamp from a GPX file"""
     try:
-        tree = ET.parse(gpx_file)
-        root = tree.getroot()
-
-        # Use the document's own namespace: GPX 1.0 and 1.1 differ
-        ns_uri = root.tag[1:].split("}")[0] if root.tag.startswith("{") else ""
-
-        def q(name):
-            return f"{{{ns_uri}}}{name}" if ns_uri else name
-
-        texts = []
-
-        # Search in trkpt (track points)
-        for time_elem in root.findall(f".//{q('trkpt')}/{q('time')}"):
-            if time_elem.text:
-                texts.append(time_elem.text)
-
-        # Search in wpt (waypoints)
-        for time_elem in root.findall(f".//{q('wpt')}/{q('time')}"):
-            if time_elem.text:
-                texts.append(time_elem.text)
-
-        # Search in metadata (GPX 1.1), or directly under <gpx> (GPX 1.0)
-        for document_time in (
-            root.find(f".//{q('metadata')}/{q('time')}"),
-            root.find(q("time")),
-        ):
-            if document_time is not None and document_time.text:
-                texts.append(document_time.text)
-
+        root = ET.parse(gpx_file).getroot()
+        texts = collect_time_texts(root)
         timestamps = [dt for dt in map(parse_gpx_time, texts) if dt is not None]
         if not timestamps:
             return None
