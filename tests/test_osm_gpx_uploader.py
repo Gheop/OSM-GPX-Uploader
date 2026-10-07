@@ -23,8 +23,8 @@ spec = importlib.util.spec_from_file_location(
     ),
 )
 uploader = importlib.util.module_from_spec(spec)
-with patch("webbrowser.open"), patch("http.server.HTTPServer"):
-    spec.loader.exec_module(uploader)
+# Importing the script opens no browser and starts no server: no patch needed
+spec.loader.exec_module(uploader)
 
 
 @pytest.fixture(autouse=True)
@@ -1135,10 +1135,16 @@ class TestAuthorizationFlow:
         )
         # Bound the wait so that a broken flow fails instead of hanging
         monkeypatch.setattr(uploader, "CALLBACK_TIMEOUT", 3)
-        # The module is loaded with HTTPServer mocked (see top of file)
-        import http.server
 
-        monkeypatch.setattr(uploader, "HTTPServer", http.server.HTTPServer)
+    def test_server_skips_host_name_lookup(self):
+        """getfqdn("127.0.0.1") prend 35 s sur les runners macOS"""
+        with patch("socket.getfqdn", side_effect=AssertionError("lookup")):
+            server = uploader.CallbackServer(("127.0.0.1", 0), uploader.CallbackHandler)
+        try:
+            assert server.server_name == "127.0.0.1"
+            assert server.server_port == server.socket.getsockname()[1]
+        finally:
+            server.server_close()
 
     def test_code_from_callback_is_returned(self):
         with patch("webbrowser.open", side_effect=browser_visiting("code=abc")):
