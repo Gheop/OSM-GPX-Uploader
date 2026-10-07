@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# A new push to a pull request makes its previous run obsolete; runs on main
+# are kept so that every commit there has a result
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
