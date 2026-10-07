@@ -1,0 +1,13 @@
+# Same checks as the lint job in CI, run before each commit:
+#   pip install -r requirements-dev.txt && pre-commit install
+repos:
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.10.0
+    hooks:
+      - id: black
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+        # Only the errors that fail CI; other warnings are reported there
+        args: ["--select=E9,F63,F7,F82"]
