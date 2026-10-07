@@ -211,3 +211,4 @@ osm_config.json
 osm_token.txt
 traces/
 traces
+bench/golden.local.json
