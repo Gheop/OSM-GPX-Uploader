@@ -275,43 +275,57 @@ def get_authorization_code(client_id):
     return server.auth_code, code_verifier
 
 
+def load_saved_token():
+    """Return the saved token if OSM still accepts it, else None
+
+    Exits when OSM cannot say: on a network or server error, a new
+    authorization in the browser would not help.
+    """
+    if not os.path.exists(TOKEN_FILE):
+        return None
+    try:
+        restrict_to_owner(TOKEN_FILE)
+        with open(TOKEN_FILE, "r") as f:
+            token = f.read().strip()
+    except OSError:
+        return None  # Unreadable token file: authorize again
+    if not token:
+        return None
+
+    # Test if token is valid
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": USER_AGENT,
+    }
+    try:
+        response = requests.get(
+            f"{OSM_API_URL}/api/0.6/user/details.json",
+            headers=headers,
+            timeout=API_TIMEOUT,
+        )
+    except requests.RequestException as e:
+        print(f"❌ Cannot reach OpenStreetMap: {e}")
+        sys.exit(1)
+
+    if response.status_code == 200:
+        print("✅ Valid existing token found")
+        return token
+    # Only a rejected token calls for a new authorization
+    if response.status_code not in (401, 403):
+        print(f"❌ OpenStreetMap unavailable (code: {response.status_code})")
+        sys.exit(1)
+    print("⚠️  Existing token invalid, new authorization required")
+    return None
+
+
 def get_access_token(client_id, client_secret, auth_code_param=None):
     """Exchange authorization code for an access token"""
 
     # Check if we already have a saved token
-    if auth_code_param is None and os.path.exists(TOKEN_FILE):
-        try:
-            restrict_to_owner(TOKEN_FILE)
-            with open(TOKEN_FILE, "r") as f:
-                token = f.read().strip()
-        except OSError:
-            token = None  # Unreadable token file: authorize again
-
+    if auth_code_param is None:
+        token = load_saved_token()
         if token:
-            # Test if token is valid
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "User-Agent": USER_AGENT,
-            }
-            try:
-                response = requests.get(
-                    f"{OSM_API_URL}/api/0.6/user/details.json",
-                    headers=headers,
-                    timeout=API_TIMEOUT,
-                )
-            except requests.RequestException as e:
-                print(f"❌ Cannot reach OpenStreetMap: {e}")
-                sys.exit(1)
-
-            if response.status_code == 200:
-                print("✅ Valid existing token found")
-                return token
-            # Only a rejected token calls for a new authorization: on a server
-            # error, opening the browser would not help
-            if response.status_code not in (401, 403):
-                print(f"❌ OpenStreetMap unavailable (code: {response.status_code})")
-                sys.exit(1)
-            print("⚠️  Existing token invalid, new authorization required")
+            return token
 
     # If no code provided, get one
     code_verifier = None
