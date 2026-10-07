@@ -699,6 +699,56 @@ class TestMainWorkflow:
             uploader.main()
 
 
+class TestTokenCheck:
+    """Tests : seul un token refusé relance l'autorisation OAuth"""
+
+    @pytest.fixture
+    def saved_token(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / uploader.TOKEN_FILE).write_text("token")
+
+    @patch.object(uploader, "get_authorization_code")
+    @patch("requests.get", return_value=Mock(status_code=503))
+    def test_server_error_exits_without_browser(self, mock_get, mock_auth, saved_token):
+        with pytest.raises(SystemExit):
+            uploader.get_access_token("id", "secret")
+        mock_auth.assert_not_called()
+
+    @patch.object(uploader, "get_authorization_code")
+    @patch("requests.get", side_effect=uploader.requests.ConnectionError("offline"))
+    def test_network_error_exits_without_browser(
+        self, mock_get, mock_auth, saved_token, capsys
+    ):
+        with pytest.raises(SystemExit):
+            uploader.get_access_token("id", "secret")
+        mock_auth.assert_not_called()
+        assert "Cannot reach OpenStreetMap: offline" in capsys.readouterr().out
+
+    @patch("requests.post")
+    @patch.object(uploader, "get_authorization_code", return_value="code")
+    @patch("requests.get", return_value=Mock(status_code=401))
+    def test_rejected_token_authorizes_again(
+        self, mock_get, mock_auth, mock_post, saved_token
+    ):
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.json.return_value = {"access_token": "new"}
+        assert uploader.get_access_token("id", "secret") == "new"
+        mock_auth.assert_called_once()
+
+    @patch("requests.post")
+    @patch.object(uploader, "get_authorization_code", return_value="code")
+    @patch("requests.get")
+    def test_empty_token_file_authorizes_again(
+        self, mock_get, mock_auth, mock_post, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / uploader.TOKEN_FILE).write_text("")
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.json.return_value = {"access_token": "new"}
+        assert uploader.get_access_token("id", "secret") == "new"
+        mock_get.assert_not_called()
+
+
 class TestNetworkTimeouts:
     """Tests que chaque appel réseau a un délai maximal"""
 
