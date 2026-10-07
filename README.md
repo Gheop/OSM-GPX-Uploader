@@ -216,10 +216,12 @@ Contributions are welcome! Here's how you can help:
    cd OSM-GPX-Uploader
    ```
 
-2. **Install development dependencies**:
+2. **Install development dependencies and the Git hooks**:
    ```bash
    pip install -r requirements-dev.txt
+   pre-commit install
    ```
+   The hooks run `black` and the blocking `flake8` checks before each commit, as the CI lint job does.
 
 3. **Run tests**:
    ```bash
@@ -326,6 +328,7 @@ Made with ❤️ for the OpenStreetMap community
 
 | Version | Date       | Changes                                               |
 |---------|------------|-------------------------------------------------------|
+| 1.2.3   | 2026-10-07 | Document the pre-commit hooks                         |
 | 1.2.2   | 2026-10-07 | Require Python 3.11 or higher                         |
 | 1.2.1   | 2026-10-07 | Explain when authorization is asked again             |
 | 1.2.0   | 2026-10-07 | Document how duplicates are detected and their limits |
