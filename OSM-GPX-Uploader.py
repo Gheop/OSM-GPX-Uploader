@@ -8,6 +8,7 @@ import os
 import sys
 import io
 import base64
+import shutil
 import hashlib
 import secrets
 import time
@@ -50,9 +51,33 @@ PARALLEL_MIN_FILES = 16
 MAX_WORKERS = 8
 
 # Configuration files
-CONFIG_FILE = "osm_config.json"
-TOKEN_FILE = "osm_token.txt"
-CACHE_FILE = "osm_gpx_cache.json"
+APP_NAME = "osm-gpx-uploader"
+# Overrides both directories (tests, benchmarks, portable installs)
+DIR_OVERRIDE_ENV = "OSM_GPX_UPLOADER_DIR"
+
+
+def user_dirs():
+    """(config directory, cache directory) following each OS convention"""
+    override = os.environ.get(DIR_OVERRIDE_ENV)
+    if override:
+        return Path(override), Path(override)
+    home = Path.home()
+    if sys.platform == "win32":
+        config_root = os.environ.get("APPDATA") or home / "AppData" / "Roaming"
+        cache_root = os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local"
+    elif sys.platform == "darwin":
+        config_root = home / "Library" / "Application Support"
+        cache_root = home / "Library" / "Caches"
+    else:
+        config_root = os.environ.get("XDG_CONFIG_HOME") or home / ".config"
+        cache_root = os.environ.get("XDG_CACHE_HOME") or home / ".cache"
+    return Path(config_root) / APP_NAME, Path(cache_root) / APP_NAME
+
+
+CONFIG_DIR, CACHE_DIR = user_dirs()
+CONFIG_FILE = str(CONFIG_DIR / "osm_config.json")
+TOKEN_FILE = str(CONFIG_DIR / "osm_token.txt")
+CACHE_FILE = str(CACHE_DIR / "osm_gpx_cache.json")
 # Bump when extract_gpx_timestamp changes: older cached results are dropped
 CACHE_VERSION = 2
 
@@ -72,6 +97,28 @@ DEFAULT_CONFIG = {
 # ============================================================================
 # CONFIGURATION MANAGEMENT
 # ============================================================================
+
+
+def make_parent_dir(path):
+    """Create the directory of path, private to the user, if missing"""
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+
+
+def migrate_legacy_files():
+    """Move files that older versions kept in the working directory
+
+    A file already at its new place wins: the old copy is left untouched.
+    """
+    for new_path in (CONFIG_FILE, TOKEN_FILE, CACHE_FILE):
+        old_path = Path(os.path.basename(new_path))
+        if not old_path.is_file() or old_path.resolve() == Path(new_path).resolve():
+            continue
+        if os.path.exists(new_path):
+            print(f"⚠️  {old_path} ignored: {new_path} is used instead")
+            continue
+        make_parent_dir(new_path)
+        shutil.move(str(old_path), new_path)
+        print(f"📦 Moved {old_path} to {new_path}")
 
 
 def private_opener(path, flags):
@@ -169,6 +216,7 @@ def load_or_create_config():
 
     # Save configuration
     try:
+        make_parent_dir(CONFIG_FILE)
         with open(config_path, "w", encoding="utf-8", opener=private_opener) as f:
             json.dump(config, indent=2, fp=f)
         print(f"\n✅ Configuration saved in {CONFIG_FILE}")
@@ -401,6 +449,7 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
     access_token = token_data["access_token"]
 
     # Save token
+    make_parent_dir(TOKEN_FILE)
     with open(TOKEN_FILE, "w", opener=private_opener) as f:
         f.write(access_token)
 
@@ -511,6 +560,7 @@ def save_timestamp_cache(entries):
     entries = {path: entry for path, entry in entries.items() if os.path.exists(path)}
     tmp_file = f"{CACHE_FILE}.tmp"
     try:
+        make_parent_dir(CACHE_FILE)
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump({"version": CACHE_VERSION, "files": entries}, f)
         os.replace(tmp_file, CACHE_FILE)
@@ -681,6 +731,7 @@ def upload_gpx(access_token, gpx_file, trace_name, config):
 def main():
     """Main program"""
     # Load or create configuration
+    migrate_legacy_files()
     config = load_or_create_config()
 
     # Ask for directory

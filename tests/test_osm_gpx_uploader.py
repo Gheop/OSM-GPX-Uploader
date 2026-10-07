@@ -28,10 +28,14 @@ with patch("webbrowser.open"), patch("http.server.HTTPServer"):
 
 @pytest.fixture(autouse=True)
 def isolated_cwd(tmp_path, monkeypatch):
-    """Chaque test tourne dans un répertoire vide : le script lit et écrit sa
-    config, son token et son cache dans le répertoire courant, qui peut
-    contenir les vrais secrets du développeur"""
+    """Chaque test tourne dans un répertoire vide, qui sert aussi de répertoire
+    de config et de cache : les vrais secrets du développeur restent intacts"""
     monkeypatch.chdir(tmp_path)
+    # Config, token and cache live in the user's directories: redirect them
+    monkeypatch.setenv(uploader.DIR_OVERRIDE_ENV, str(tmp_path))
+    for name in ("CONFIG_FILE", "TOKEN_FILE", "CACHE_FILE"):
+        file_name = os.path.basename(getattr(uploader, name))
+        monkeypatch.setattr(uploader, name, str(tmp_path / file_name))
 
 
 class TestConfiguration:
@@ -142,6 +146,104 @@ class TestVisibilityValidation:
         config = uploader.load_or_create_config()
         assert config["visibility"] == "trackable"
         assert "Use one of: public, identifiable" in capsys.readouterr().out
+
+
+class TestUserDirectories:
+    """Tests : config, token et cache vont dans les répertoires de l'utilisateur"""
+
+    @pytest.fixture
+    def home(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(uploader.DIR_OVERRIDE_ENV, raising=False)
+        for name in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(uploader.Path, "home", lambda: tmp_path)
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "platform, config, cache",
+        [
+            ("linux", ".config", ".cache"),
+            ("darwin", "Library/Application Support", "Library/Caches"),
+            ("win32", "AppData/Roaming", "AppData/Local"),
+        ],
+    )
+    def test_default_directories(self, home, monkeypatch, platform, config, cache):
+        monkeypatch.setattr(uploader.sys, "platform", platform)
+        assert uploader.user_dirs() == (
+            home / config / "osm-gpx-uploader",
+            home / cache / "osm-gpx-uploader",
+        )
+
+    def test_xdg_variables_are_followed(self, home, monkeypatch):
+        monkeypatch.setattr(uploader.sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "cfg"))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(home / "cch"))
+        assert uploader.user_dirs() == (
+            home / "cfg" / "osm-gpx-uploader",
+            home / "cch" / "osm-gpx-uploader",
+        )
+
+    def test_override_sets_both_directories(self, home, monkeypatch):
+        monkeypatch.setenv(uploader.DIR_OVERRIDE_ENV, str(home / "portable"))
+        assert uploader.user_dirs() == (home / "portable", home / "portable")
+
+
+class TestLegacyMigration:
+    """Tests du déplacement des fichiers laissés dans le dossier courant"""
+
+    @pytest.fixture
+    def new_dirs(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / "config"
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(
+            uploader, "CONFIG_FILE", str(config_dir / "osm_config.json")
+        )
+        monkeypatch.setattr(uploader, "TOKEN_FILE", str(config_dir / "osm_token.txt"))
+        monkeypatch.setattr(
+            uploader, "CACHE_FILE", str(cache_dir / "osm_gpx_cache.json")
+        )
+        return config_dir, cache_dir
+
+    def test_old_files_are_moved(self, tmp_path, new_dirs, capsys):
+        config_dir, cache_dir = new_dirs
+        for name in ("osm_config.json", "osm_token.txt", "osm_gpx_cache.json"):
+            (tmp_path / name).write_text(name)
+        uploader.migrate_legacy_files()
+        assert (config_dir / "osm_config.json").read_text() == "osm_config.json"
+        assert (config_dir / "osm_token.txt").read_text() == "osm_token.txt"
+        assert (cache_dir / "osm_gpx_cache.json").read_text() == "osm_gpx_cache.json"
+        assert not (tmp_path / "osm_token.txt").exists()
+        assert capsys.readouterr().out.count("📦 Moved") == 3
+
+    @pytest.mark.skipif(os.name != "posix", reason="permissions POSIX")
+    def test_new_directory_is_private(self, tmp_path, new_dirs):
+        (tmp_path / "osm_token.txt").write_text("token")
+        uploader.migrate_legacy_files()
+        assert new_dirs[0].stat().st_mode & 0o777 == 0o700
+
+    def test_file_at_new_place_wins(self, tmp_path, new_dirs, capsys):
+        config_dir, _ = new_dirs
+        config_dir.mkdir()
+        (config_dir / "osm_token.txt").write_text("new")
+        (tmp_path / "osm_token.txt").write_text("old")
+        uploader.migrate_legacy_files()
+        assert (config_dir / "osm_token.txt").read_text() == "new"
+        assert (tmp_path / "osm_token.txt").read_text() == "old"
+        assert "osm_token.txt ignored" in capsys.readouterr().out
+
+    def test_nothing_to_move(self, new_dirs, capsys):
+        uploader.migrate_legacy_files()
+        assert capsys.readouterr().out == ""
+        assert not new_dirs[0].exists()
+
+    def test_main_migrates_before_loading_config(self, tmp_path, new_dirs):
+        (tmp_path / "osm_config.json").write_text(
+            '{"client_id": "id", "client_secret": "secret", "visibility": "private"}'
+        )
+        with patch("sys.argv", ["script.py", str(tmp_path / "missing")]):
+            with pytest.raises(SystemExit):
+                uploader.main()
+        assert (new_dirs[0] / "osm_config.json").exists()
 
 
 class TestGPXParsing:

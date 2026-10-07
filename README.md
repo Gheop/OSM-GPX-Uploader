@@ -87,7 +87,7 @@ Visibility [identifiable]:
 Description [Automatically uploaded trace]: 
 Tags [survey]: 
 
-✅ Configuration saved in osm_config.json
+✅ Configuration saved in /home/you/.config/osm-gpx-uploader/osm_config.json
    You can edit this file directly if needed.
 
 📁 3 GPX file(s) found
@@ -133,9 +133,23 @@ The script automatically uses the saved configuration and token!
 
 ## ⚙️ Configuration
 
+### Files location
+
+The script keeps its files in your user directories, so it works the same from any folder:
+
+| System  | Configuration and token                           | Cache                                |
+|---------|---------------------------------------------------|--------------------------------------|
+| Linux   | `~/.config/osm-gpx-uploader/`                     | `~/.cache/osm-gpx-uploader/`         |
+| macOS   | `~/Library/Application Support/osm-gpx-uploader/` | `~/Library/Caches/osm-gpx-uploader/` |
+| Windows | `%APPDATA%\osm-gpx-uploader\`                     | `%LOCALAPPDATA%\osm-gpx-uploader\`   |
+
+On Linux, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are honoured. Set `OSM_GPX_UPLOADER_DIR` to keep all files in one folder of your choice instead.
+
+Older versions kept `osm_config.json`, `osm_token.txt` and `osm_gpx_cache.json` in the folder the script was run from. The first run of this version moves them to the locations above; if a file already exists there, the old copy is left in place and ignored.
+
 ### `osm_config.json` file
 
-After first use, an `osm_config.json` file is created:
+After first use, `osm_config.json` is created in the configuration directory:
 
 ```json
 {
@@ -165,15 +179,15 @@ Add tags separated by commas to organize your traces:
 
 ### `osm_gpx_cache.json` file
 
-The script stores the date/time it extracted from each GPX file in `osm_gpx_cache.json`, so the next runs only read new or modified files. A file is read again when its size or modification time changes. Deleting the cache is always safe: the next run rebuilds it.
+The script stores the date/time it extracted from each GPX file in `osm_gpx_cache.json`, in the cache directory, so the next runs only read new or modified files. A file is read again when its size or modification time changes. Deleting the cache is always safe: the next run rebuilds it.
 
 ## 🔧 Troubleshooting
 
 ### Token is invalid every time
 
-Delete the `osm_token.txt` file and restart:
+Delete the `osm_token.txt` file from the configuration directory (see [Files location](#files-location)) and restart. On Linux:
 ```bash
-rm osm_token.txt
+rm ~/.config/osm-gpx-uploader/osm_token.txt
 python OSM-GPX-Uploader.py traces
 ```
 
@@ -273,8 +287,8 @@ This format allows:
 
 ## 🔒 Security
 
-- ⚠️ **Never commit** your `osm_config.json` or `osm_token.txt` to Git
-- These files are already in `.gitignore` by default
+- Your token and Client Secret are stored in your user configuration directory, readable by you only
+- ⚠️ **Never commit** your `osm_config.json` or `osm_token.txt` to Git; if older copies remain in your project folder, they are listed in `.gitignore`
 - Your Client Secret should not be shared with anyone
 - If you think your credentials have been compromised, revoke the application on OpenStreetMap and create a new one
 
@@ -300,8 +314,9 @@ Made with ❤️ for the OpenStreetMap community
 
 ## README changelog
 
-| Version | Date       | Changes                                    |
-|---------|------------|--------------------------------------------|
-| 1.0.2   | 2026-10-07 | Require Python 3.10 or higher              |
-| 1.0.1   | 2026-10-07 | Install dependencies from requirements.txt |
-| 1.0.0   | 2026-10-07 | Document the timestamp cache file          |
+| Version | Date       | Changes                                         |
+|---------|------------|-------------------------------------------------|
+| 1.1.0   | 2026-10-07 | Add files location section for user directories |
+| 1.0.2   | 2026-10-07 | Require Python 3.10 or higher                   |
+| 1.0.1   | 2026-10-07 | Install dependencies from requirements.txt      |
+| 1.0.0   | 2026-10-07 | Document the timestamp cache file               |

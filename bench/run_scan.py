@@ -64,7 +64,10 @@ def main():
 
     # config and token are read from the working directory
     with tempfile.TemporaryDirectory() as tmp:
-        os.chdir(os.environ.get("BENCH_WORKDIR") or tmp)
+        workdir = os.environ.get("BENCH_WORKDIR") or tmp
+        os.chdir(workdir)
+        # The script keeps config, token and cache there too, not in ~/.config
+        os.environ["OSM_GPX_UPLOADER_DIR"] = workdir
         Path("osm_config.json").write_text(json.dumps(config))
         Path("osm_token.txt").write_text("token")
         with patch.object(

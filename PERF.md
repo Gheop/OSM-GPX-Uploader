@@ -38,7 +38,7 @@ moins coûteux sur tous les axes.
 **Changement visible** : pendant le scan, les lignes `📄 fichier` s'affichent
 toutes après l'extraction (environ 1 s) au lieu d'apparaître au fil de l'eau.
 Leur contenu et leur ordre sont identiques. Un fichier `osm_gpx_cache.json` est
-créé à côté de `osm_config.json` (documenté dans le README).
+créé dans le répertoire de cache de l'utilisateur (documenté dans le README).
 
 ## 2. Ce qui a payé
 
