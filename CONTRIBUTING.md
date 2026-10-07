@@ -4,6 +4,7 @@
 1. Fork the repository
 2. Clone: `git clone https://github.com/YOUR_USERNAME/OSM-GPX-Uploader.git`
 3. Install: `pip install -r requirements-dev.txt`
+4. Install the Git hooks: `pre-commit install` (black and flake8 run before each commit)
 
 ## Running Tests
 ```bash
