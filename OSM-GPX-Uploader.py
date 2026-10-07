@@ -29,6 +29,10 @@ USER_AGENT = "OSM-GPX-Uploader/1.0 (https://github.com/Gheop/OSM-GPX-Uploader)"
 OSM_WEB_URL = "https://www.openstreetmap.org"  # For OAuth
 OSM_API_URL = "https://api.openstreetmap.org"  # For GPX API
 REDIRECT_URI = "http://127.0.0.1:8000/callback"  # Do not modify
+# Seconds; requests waits forever by default
+API_TIMEOUT = 30
+# (connect, read): OSM processes the whole GPX file before answering
+UPLOAD_TIMEOUT = (30, 300)
 
 # Below this many files, starting worker processes costs more than it saves
 PARALLEL_MIN_FILES = 16
@@ -208,7 +212,9 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
                     "User-Agent": USER_AGENT,
                 }
                 response = requests.get(
-                    f"{OSM_API_URL}/api/0.6/user/details.json", headers=headers
+                    f"{OSM_API_URL}/api/0.6/user/details.json",
+                    headers=headers,
+                    timeout=API_TIMEOUT,
                 )
                 if response.status_code == 200:
                     print("✅ Valid existing token found")
@@ -234,12 +240,17 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
         "redirect_uri": REDIRECT_URI,
     }
 
-    response = requests.post(
-        token_url,
-        data=data,
-        auth=HTTPBasicAuth(client_id, client_secret),
-        headers={"User-Agent": USER_AGENT},
-    )
+    try:
+        response = requests.post(
+            token_url,
+            data=data,
+            auth=HTTPBasicAuth(client_id, client_secret),
+            headers={"User-Agent": USER_AGENT},
+            timeout=API_TIMEOUT,
+        )
+    except requests.RequestException as e:
+        print(f"❌ Error obtaining token: {e}")
+        sys.exit(1)
 
     if response.status_code != 200:
         print(f"❌ Error obtaining token: {response.status_code}")
@@ -432,7 +443,7 @@ def get_existing_traces(access_token):
             "Authorization": f"Bearer {access_token}",
             "User-Agent": USER_AGENT,
         }
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=API_TIMEOUT)
 
         if response.status_code != 200:
             print(f"❌ Error retrieving traces: {response.status_code}")
@@ -485,7 +496,9 @@ def upload_gpx(access_token, gpx_file, trace_name, config):
                 "visibility": config["visibility"],
             }
 
-            response = requests.post(url, files=files, data=data, headers=headers)
+            response = requests.post(
+                url, files=files, data=data, headers=headers, timeout=UPLOAD_TIMEOUT
+            )
 
         if response.status_code in [200, 201]:
             trace_id = response.text.strip()

@@ -699,6 +699,52 @@ class TestMainWorkflow:
             uploader.main()
 
 
+class TestNetworkTimeouts:
+    """Tests que chaque appel réseau a un délai maximal"""
+
+    @patch("requests.get")
+    def test_token_check_has_timeout(self, mock_get, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / uploader.TOKEN_FILE).write_text("token")
+        mock_get.return_value = Mock(status_code=200)
+        uploader.get_access_token("id", "secret")
+        assert mock_get.call_args.kwargs["timeout"] == uploader.API_TIMEOUT
+
+    @patch("requests.post")
+    def test_token_exchange_has_timeout(self, mock_post, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.json.return_value = {"access_token": "new"}
+        uploader.get_access_token("id", "secret", auth_code_param="code")
+        assert mock_post.call_args.kwargs["timeout"] == uploader.API_TIMEOUT
+
+    @patch("requests.post", side_effect=uploader.requests.Timeout("too slow"))
+    def test_token_exchange_timeout_exits_cleanly(self, mock_post, capsys):
+        with pytest.raises(SystemExit):
+            uploader.get_access_token("id", "secret", auth_code_param="code")
+        assert "Error obtaining token: too slow" in capsys.readouterr().out
+
+    @patch("requests.get")
+    def test_trace_list_has_timeout(self, mock_get):
+        mock_get.return_value = Mock(status_code=200)
+        mock_get.return_value.json.return_value = {"traces": []}
+        uploader.get_existing_traces("token")
+        assert mock_get.call_args.kwargs["timeout"] == uploader.API_TIMEOUT
+
+    @patch("requests.get", side_effect=uploader.requests.Timeout("too slow"))
+    def test_trace_list_timeout_means_unavailable(self, mock_get):
+        assert uploader.get_existing_traces("token") is None
+
+    @patch("requests.post")
+    def test_upload_has_timeout(self, mock_post, tmp_path):
+        gpx_file = tmp_path / "trace.gpx"
+        gpx_file.write_text("<gpx/>")
+        mock_post.return_value = Mock(status_code=200, text="1")
+        config = {"description": "d", "tags": "t", "visibility": "private"}
+        assert uploader.upload_gpx("token", gpx_file, "20231122 - 14:04", config)
+        assert mock_post.call_args.kwargs["timeout"] == uploader.UPLOAD_TIMEOUT
+
+
 def write_gpx_files(directory, count):
     """Écrit count fichiers GPX minimaux, un par minute à partir de 14:00"""
     for minute in range(count):
