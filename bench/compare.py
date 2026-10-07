@@ -4,8 +4,11 @@
 Alternating A/B runs cancels most thermal and frequency drift, which
 dominates noise on laptops where the governor cannot be pinned.
 
-Usage: python bench/compare.py BASELINE_ROOT CANDIDATE_ROOT GPX_DIR [RUNS] [CPU]
+Both checkouts run under this checkout's harness.
+
+Usage: python bench/compare.py BASELINE_ROOT CANDIDATE_ROOT GPX_DIR [RUNS] [CPUS]
 A single root measures that checkout alone (writes nothing).
+CPUS is a taskset list, e.g. 12 or 12-19.
 """
 import json
 import statistics
@@ -13,11 +16,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+HARNESS = Path(__file__).resolve().parent / "run_scan.py"
+
 
 def run_once(root, gpx_dir, cpu):
-    # time writes "<wall seconds> <max RSS KB> <user+sys seconds>" to stderr
+    # time writes "<wall seconds> <max RSS KB> <user seconds> <sys seconds>"
+    # to stderr. Max RSS covers the largest single process, not the sum of
+    # workers: measure the total with bench/mem_peak.sh
     cmd = ["/usr/bin/time", "-f", "%e %M %U %S", "taskset", "-c", cpu,
-           sys.executable, str(Path(root) / "bench" / "run_scan.py"), gpx_dir]
+           sys.executable, str(HARNESS), str(Path(root) / "OSM-GPX-Uploader.py"), gpx_dir]
     proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                           text=True, check=True)
     wall, rss, user, system = proc.stderr.strip().splitlines()[-1].split()

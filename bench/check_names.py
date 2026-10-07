@@ -5,6 +5,7 @@ Usage:
   python bench/check_names.py GPX_DIR --record   # write the golden file
   python bench/check_names.py GPX_DIR            # compare against it
 """
+import importlib.util
 import json
 import sys
 from contextlib import redirect_stdout
@@ -12,7 +13,17 @@ from datetime import datetime
 from io import StringIO
 from pathlib import Path
 
-from run_scan import GOLDEN, load_uploader
+from run_scan import GOLDEN
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_uploader():
+    spec = importlib.util.spec_from_file_location("uploader", ROOT / "OSM-GPX-Uploader.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def trace_names(gpx_dir):

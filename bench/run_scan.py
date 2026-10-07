@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""Run main() on a real GPX directory with the OSM API mocked.
+"""Run the uploader on a real GPX directory with the OSM API mocked.
 
 Every trace is reported as already uploaded, so the run measures the local
 work only: directory scan, timestamp extraction and duplicate detection.
+The script runs as __main__, as it does for users, so that worker processes
+can re-import it.
 
-Usage: python bench/run_scan.py GPX_DIR
+Usage: python bench/run_scan.py SCRIPT GPX_DIR [--verify]
+  --verify  check that each file maps to the name in golden.local.json
 """
-import importlib.util
+import io
 import json
 import os
+import re
+import runpy
 import sys
 import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-ROOT = Path(__file__).resolve().parent.parent
+import requests
+
 GOLDEN = Path(__file__).resolve().parent / "golden.local.json"
-
-
-def load_uploader():
-    spec = importlib.util.spec_from_file_location("uploader", ROOT / "OSM-GPX-Uploader.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def fake_get(trace_names):
@@ -36,22 +36,36 @@ def fake_get(trace_names):
     return get
 
 
+def check_output(output, expected):
+    names = dict(re.findall(r"📄 (.+)\n(?:.*\n)*?  📅 Date/time: (.+)", output))
+    if names != expected:
+        wrong = {k for k in expected.keys() | names.keys() if names.get(k) != expected.get(k)}
+        sys.exit(f"MISMATCH on {len(wrong)} file(s): {sorted(wrong)[:5]}")
+    print(f"OK: {len(names)} names identical", file=sys.stderr)
+
+
 def main():
-    gpx_dir = Path(sys.argv[1]).resolve()
-    uploader = load_uploader()
+    script = Path(sys.argv[1]).resolve()
+    gpx_dir = Path(sys.argv[2]).resolve()
     expected = json.loads(GOLDEN.read_text())
     config = {"client_id": "id", "client_secret": "secret", "visibility": "private",
               "description": "bench", "tags": "bench"}
+    output = io.StringIO() if "--verify" in sys.argv else sys.stdout
 
-    # get_access_token reads the token from the working directory
+    # config and token are read from the working directory
     with tempfile.TemporaryDirectory() as workdir:
         os.chdir(workdir)
-        Path(uploader.TOKEN_FILE).write_text("token")
-        with patch.object(uploader, "load_or_create_config", return_value=config), \
-                patch.object(uploader.requests, "get", side_effect=fake_get(expected.values())), \
-                patch.object(uploader, "upload_gpx", side_effect=AssertionError("unexpected upload")), \
-                patch.object(sys, "argv", ["bench", str(gpx_dir)]):
-            uploader.main()
+        Path("osm_config.json").write_text(json.dumps(config))
+        Path("osm_token.txt").write_text("token")
+        with patch.object(requests, "get", side_effect=fake_get(expected.values())), \
+                patch.object(requests, "post", side_effect=AssertionError("unexpected upload")), \
+                patch.object(sys, "argv", [str(script), str(gpx_dir)]), \
+                redirect_stdout(output):
+            runpy.run_path(str(script), run_name="__main__")
+
+    if output is not sys.stdout:
+        check_output(output.getvalue(), expected)
+
 
 if __name__ == "__main__":
     main()
