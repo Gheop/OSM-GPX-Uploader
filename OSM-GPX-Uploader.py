@@ -9,6 +9,7 @@ import sys
 import io
 import base64
 import shutil
+import socketserver
 import hashlib
 import secrets
 import time
@@ -236,6 +237,18 @@ def load_or_create_config():
 CALLBACK_TIMEOUT = 120
 
 
+class CallbackServer(HTTPServer):
+    """HTTPServer without the host name lookup HTTPServer does at bind time
+
+    HTTPServer.server_bind resolves 127.0.0.1 with socket.getfqdn, which
+    takes 35 s on macOS GitHub runners; the name is never used here.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 class CallbackHandler(BaseHTTPRequestHandler):
     """Handle OAuth callback
 
@@ -319,7 +332,7 @@ def get_authorization_code(client_id):
     # Start local server to receive callback
     port = urlparse(REDIRECT_URI).port
     try:
-        server = HTTPServer(("127.0.0.1", port), CallbackHandler)
+        server = CallbackServer(("127.0.0.1", port), CallbackHandler)
     except OSError as e:
         print(f"❌ Cannot listen on 127.0.0.1:{port} for the OSM callback: {e}")
         print(f"   Close the program using port {port}, then run the script again.")
