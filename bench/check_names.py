@@ -20,7 +20,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_uploader():
-    spec = importlib.util.spec_from_file_location("uploader", ROOT / "OSM-GPX-Uploader.py")
+    spec = importlib.util.spec_from_file_location(
+        "uploader", ROOT / "OSM-GPX-Uploader.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -46,8 +48,11 @@ def main():
         print(f"recorded {len(names)} names in {GOLDEN}")
         return
     expected = json.loads(GOLDEN.read_text())
-    diff = {k: (expected.get(k), names.get(k)) for k in expected.keys() | names.keys()
-            if expected.get(k) != names.get(k)}
+    diff = {
+        k: (expected.get(k), names.get(k))
+        for k in expected.keys() | names.keys()
+        if expected.get(k) != names.get(k)
+    }
     if diff:
         print(f"MISMATCH on {len(diff)} file(s): {dict(list(diff.items())[:5])}")
         sys.exit(1)

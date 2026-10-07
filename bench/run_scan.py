@@ -42,7 +42,9 @@ def fake_get(trace_names):
 def check_output(output, expected):
     names = dict(re.findall(r"📄 (.+)\n(?:.*\n)*?  📅 Date/time: (.+)", output))
     if names != expected:
-        wrong = {k for k in expected.keys() | names.keys() if names.get(k) != expected.get(k)}
+        wrong = {
+            k for k in expected.keys() | names.keys() if names.get(k) != expected.get(k)
+        }
         sys.exit(f"MISMATCH on {len(wrong)} file(s): {sorted(wrong)[:5]}")
     print(f"OK: {len(names)} names identical", file=sys.stderr)
 
@@ -51,8 +53,13 @@ def main():
     script = Path(sys.argv[1]).resolve()
     gpx_dir = Path(sys.argv[2]).resolve()
     expected = json.loads(GOLDEN.read_text())
-    config = {"client_id": "id", "client_secret": "secret", "visibility": "private",
-              "description": "bench", "tags": "bench"}
+    config = {
+        "client_id": "id",
+        "client_secret": "secret",
+        "visibility": "private",
+        "description": "bench",
+        "tags": "bench",
+    }
     output = io.StringIO() if "--verify" in sys.argv else sys.stdout
 
     # config and token are read from the working directory
@@ -60,10 +67,15 @@ def main():
         os.chdir(os.environ.get("BENCH_WORKDIR") or tmp)
         Path("osm_config.json").write_text(json.dumps(config))
         Path("osm_token.txt").write_text("token")
-        with patch.object(requests, "get", side_effect=fake_get(expected.values())), \
-                patch.object(requests, "post", side_effect=AssertionError("unexpected upload")), \
-                patch.object(sys, "argv", [str(script), str(gpx_dir)]), \
-                redirect_stdout(output):
+        with patch.object(
+            requests, "get", side_effect=fake_get(expected.values())
+        ), patch.object(
+            requests, "post", side_effect=AssertionError("unexpected upload")
+        ), patch.object(
+            sys, "argv", [str(script), str(gpx_dir)]
+        ), redirect_stdout(
+            output
+        ):
             runpy.run_path(str(script), run_name="__main__")
 
     if output is not sys.stdout:
