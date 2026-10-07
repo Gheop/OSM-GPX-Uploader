@@ -277,7 +277,8 @@ class TestOAuthFlow:
             uploader.CallbackHandler, "__init__", lambda x, y, z, w: None
         ):
             handler = uploader.CallbackHandler(None, None, None)
-            handler.path = "/callback?code=test_code_123"
+            handler.server = Mock(expected_state="s", auth_code=None)
+            handler.path = "/callback?code=test_code_123&state=s"
             handler.send_response = Mock()
             handler.send_header = Mock()
             handler.end_headers = Mock()
@@ -285,17 +286,18 @@ class TestOAuthFlow:
 
             handler.do_GET()
 
-            assert uploader.auth_code == "test_code_123"
+            assert handler.server.auth_code == "test_code_123"
+            assert handler.server.callback_done is True
             handler.send_response.assert_called_with(200)
 
     def test_callback_handler_error(self):
         """Test le callback handler sans code"""
-        uploader.auth_code = None
         with patch.object(
             uploader.CallbackHandler, "__init__", lambda x, y, z, w: None
         ):
             handler = uploader.CallbackHandler(None, None, None)
-            handler.path = "/callback?error=access_denied"
+            handler.server = Mock(expected_state="s", auth_code=None)
+            handler.path = "/callback?error=access_denied&state=s"
             handler.send_response = Mock()
             handler.send_header = Mock()
             handler.end_headers = Mock()
@@ -327,7 +329,9 @@ class TestOAuthFlow:
         assert token == "valid_token"
 
     @patch("requests.post")
-    @patch.object(uploader, "get_authorization_code", return_value="new_code")
+    @patch.object(
+        uploader, "get_authorization_code", return_value=("new_code", "verifier")
+    )
     @patch("os.path.exists", return_value=True)
     @patch("builtins.open", side_effect=Exception("Read error"))
     def test_get_access_token_token_read_exception(
@@ -344,7 +348,9 @@ class TestOAuthFlow:
     @patch("requests.get")
     @patch("builtins.open", new_callable=mock_open, read_data="invalid_token")
     @patch("os.path.exists", return_value=True)
-    @patch.object(uploader, "get_authorization_code", return_value="new_code")
+    @patch.object(
+        uploader, "get_authorization_code", return_value=("new_code", "verifier")
+    )
     @patch("requests.post")
     def test_get_access_token_existing_invalid(
         self, mock_post, mock_auth, mock_exists, mock_file, mock_get
@@ -733,7 +739,7 @@ class TestTokenCheck:
         assert "Cannot reach OpenStreetMap: offline" in capsys.readouterr().out
 
     @patch("requests.post")
-    @patch.object(uploader, "get_authorization_code", return_value="code")
+    @patch.object(uploader, "get_authorization_code", return_value=("code", "verifier"))
     @patch("requests.get", return_value=Mock(status_code=401))
     def test_rejected_token_authorizes_again(
         self, mock_get, mock_auth, mock_post, saved_token
@@ -744,7 +750,7 @@ class TestTokenCheck:
         mock_auth.assert_called_once()
 
     @patch("requests.post")
-    @patch.object(uploader, "get_authorization_code", return_value="code")
+    @patch.object(uploader, "get_authorization_code", return_value=("code", "verifier"))
     @patch("requests.get")
     def test_empty_token_file_authorizes_again(
         self, mock_get, mock_auth, mock_post, tmp_path, monkeypatch
@@ -811,17 +817,26 @@ def free_port():
         return sock.getsockname()[1]
 
 
-def browser_visiting(query):
-    """Faux navigateur : suit la redirection d'OSM vers le callback local"""
+def browser_visiting(*queries):
+    """Faux navigateur : suit la redirection d'OSM vers le callback local
+
+    Chaque requête reçoit le state de l'URL d'autorisation, comme le fait
+    OSM, sauf si elle en précise un.
+    """
     import urllib.error
     import urllib.request
 
     def open_browser(auth_url):
-        url = f"{uploader.REDIRECT_URI}?{query}"
-        try:
-            urllib.request.urlopen(url, timeout=5).close()
-        except urllib.error.HTTPError:
-            pass  # Réponse d'erreur du callback : le test regarde le résultat
+        state = uploader.parse_qs(uploader.urlparse(auth_url).query)["state"][0]
+        for query in queries:
+            if "state=" not in query:
+                query = f"{query}&state={state}"
+            try:
+                urllib.request.urlopen(
+                    f"{uploader.REDIRECT_URI}?{query}", timeout=5
+                ).close()
+            except urllib.error.HTTPError:
+                pass  # Réponse d'erreur du callback : le test regarde le résultat
 
     return open_browser
 
@@ -835,7 +850,8 @@ class TestAuthorizationFlow:
         monkeypatch.setattr(
             uploader, "REDIRECT_URI", f"http://127.0.0.1:{port}/callback"
         )
-        monkeypatch.setattr(uploader, "auth_code", None)
+        # Bound the wait so that a broken flow fails instead of hanging
+        monkeypatch.setattr(uploader, "CALLBACK_TIMEOUT", 3)
         # The module is loaded with HTTPServer mocked (see top of file)
         import http.server
 
@@ -843,7 +859,49 @@ class TestAuthorizationFlow:
 
     def test_code_from_callback_is_returned(self):
         with patch("webbrowser.open", side_effect=browser_visiting("code=abc")):
-            assert uploader.get_authorization_code("client") == "abc"
+            code, verifier = uploader.get_authorization_code("client")
+        assert code == "abc"
+        assert len(verifier) >= 43  # RFC 7636 minimum
+
+    def test_requests_without_our_state_are_ignored(self):
+        """Une requête sans state ou avec un state forgé ne fournit pas le code"""
+        browser = browser_visiting(
+            "code=forged&state=", "code=forged&state=other", "code=abc"
+        )
+        with patch("webbrowser.open", side_effect=browser):
+            code, _ = uploader.get_authorization_code("client")
+        assert code == "abc"
+
+    def test_pkce_challenge_matches_verifier(self):
+        import base64
+        import hashlib
+
+        with patch(
+            "webbrowser.open", side_effect=browser_visiting("code=abc")
+        ) as browser:
+            _, verifier = uploader.get_authorization_code("client")
+        query = uploader.parse_qs(uploader.urlparse(browser.call_args.args[0]).query)
+        expected = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).rstrip(b"=")
+        assert query["code_challenge"] == [expected.decode()]
+        assert query["code_challenge_method"] == ["S256"]
+
+    def test_no_callback_exits_at_deadline(self, monkeypatch):
+        monkeypatch.setattr(uploader, "CALLBACK_TIMEOUT", 1)
+        with patch("webbrowser.open"):
+            with pytest.raises(SystemExit):
+                uploader.get_authorization_code("client")
+
+    @patch("requests.post")
+    def test_verifier_is_sent_with_the_code(self, mock_post):
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.json.return_value = {"access_token": "new"}
+        with patch("webbrowser.open", side_effect=browser_visiting("code=abc")):
+            uploader.get_access_token("client", "secret")
+        sent = mock_post.call_args.kwargs["data"]
+        assert sent["code"] == "abc"
+        assert len(sent["code_verifier"]) >= 43
 
     def test_authorize_url_requests_gpx_scopes(self):
         with patch(

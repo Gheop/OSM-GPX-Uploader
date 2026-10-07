@@ -7,6 +7,10 @@ Uses OAuth 2.0 authentication
 import os
 import sys
 import io
+import base64
+import hashlib
+import secrets
+import time
 import json
 import re
 from contextlib import redirect_stdout
@@ -146,41 +150,69 @@ def load_or_create_config():
 # OAUTH 2.0 MANAGEMENT
 # ============================================================================
 
-# Global variable to store authorization code
-auth_code = None  # noqa: F841
+# Seconds the user has to authorize the application in the browser
+CALLBACK_TIMEOUT = 120
 
 
 class CallbackHandler(BaseHTTPRequestHandler):
-    """Handle OAuth callback"""
+    """Handle OAuth callback
+
+    The server carries expected_state, and receives auth_code and
+    callback_done once the callback for this authorization arrives.
+    """
+
+    # Seconds before dropping a client that connects but sends nothing
+    timeout = 5
 
     def do_GET(self):
-        global auth_code
-        query = parse_qs(self.path.split("?")[1] if "?" in self.path else "")
+        url = urlparse(self.path)
+        query = parse_qs(url.query)
 
+        # Requests without our state (another page, a port scan, a forged
+        # redirect) are answered and ignored: keep waiting for the real one
+        if url.path != urlparse(REDIRECT_URI).path or query.get("state") != [
+            self.server.expected_state
+        ]:
+            self.respond(400, b"<h1>Error</h1><p>Unexpected request.</p>")
+            return
+
+        self.server.callback_done = True
         if "code" in query:
-            auth_code = query["code"][0]
-            self.send_response(200)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(
-                b"<html><body><h1>Authorization successful!</h1>"
-                b"<p>You can close this window.</p></body></html>"
+            self.server.auth_code = query["code"][0]
+            self.respond(
+                200,
+                b"<h1>Authorization successful!</h1>"
+                b"<p>You can close this window.</p>",
             )
         else:
-            self.send_response(400)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(
-                b"<html><body><h1>Error</h1>" b"<p>No code received.</p></body></html>"
-            )
+            self.respond(400, b"<h1>Error</h1><p>No code received.</p>")
+
+    def respond(self, status, body):
+        self.send_response(status)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<html><body>" + body + b"</body></html>")
 
     def log_message(self, format, *args):
         pass  # Suppress server logs
 
 
+def pkce_pair():
+    """PKCE code verifier and its S256 challenge (RFC 7636)"""
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
 def get_authorization_code(client_id):
-    """Launch OAuth 2.0 flow to obtain an authorization code"""
-    global auth_code  # noqa: F824
+    """Launch OAuth 2.0 flow to obtain an authorization code
+
+    Returns (code, code_verifier): the verifier goes with the code when it is
+    exchanged for a token.
+    """
+    state = secrets.token_urlsafe(32)
+    code_verifier, code_challenge = pkce_pair()
 
     # Authorization request parameters
     params = {
@@ -188,6 +220,9 @@ def get_authorization_code(client_id):
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
         "scope": "read_gpx write_gpx",
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
 
     auth_url = f"{OSM_WEB_URL}/oauth2/authorize?{urlencode(params)}"
@@ -198,7 +233,18 @@ def get_authorization_code(client_id):
 
     # Start local server to receive callback
     server = HTTPServer(("127.0.0.1", urlparse(REDIRECT_URI).port), CallbackHandler)
-    server_thread = threading.Thread(target=server.handle_request)
+    server.expected_state = state
+    server.auth_code = None
+    server.callback_done = False
+    # handle_request() returns after 1 s without a request, to check the deadline
+    server.timeout = 1
+
+    def serve_until_callback():
+        deadline = time.monotonic() + CALLBACK_TIMEOUT
+        while not server.callback_done and time.monotonic() < deadline:
+            server.handle_request()
+
+    server_thread = threading.Thread(target=serve_until_callback)
     server_thread.daemon = True
     server_thread.start()
 
@@ -206,14 +252,14 @@ def get_authorization_code(client_id):
     webbrowser.open(auth_url)
 
     # Wait for callback (max 2 minutes)
-    server_thread.join(timeout=120)
+    server_thread.join(timeout=CALLBACK_TIMEOUT + CallbackHandler.timeout)
     server.server_close()
 
-    if auth_code is None:
+    if server.auth_code is None:
         print("❌ Timeout: no authorization received")
         sys.exit(1)
 
-    return auth_code
+    return server.auth_code, code_verifier
 
 
 def get_access_token(client_id, client_secret, auth_code_param=None):
@@ -255,8 +301,9 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
             print("⚠️  Existing token invalid, new authorization required")
 
     # If no code provided, get one
+    code_verifier = None
     if auth_code_param is None:
-        auth_code_param = get_authorization_code(client_id)
+        auth_code_param, code_verifier = get_authorization_code(client_id)
 
     # Exchange code for token
     token_url = f"{OSM_WEB_URL}/oauth2/token"
@@ -269,6 +316,8 @@ def get_access_token(client_id, client_secret, auth_code_param=None):
         "code": auth_code_param,
         "redirect_uri": REDIRECT_URI,
     }
+    if code_verifier:
+        data["code_verifier"] = code_verifier
 
     try:
         response = requests.post(
