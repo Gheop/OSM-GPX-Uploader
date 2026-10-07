@@ -357,11 +357,16 @@ def get_authorization_code(client_id):
     return server.auth_code, code_verifier
 
 
-def load_saved_token():
-    """Return the saved token if OSM still accepts it, else None
+class TokenRejectedError(Exception):
+    """OpenStreetMap refused the access token (401 or 403)"""
 
-    Exits when OSM cannot say: on a network or server error, a new
-    authorization in the browser would not help.
+
+def load_saved_token():
+    """Return the saved token, or None if there is none
+
+    The token is not checked here: the trace list request, which is needed
+    anyway, tells whether OSM still accepts it. A dedicated check on
+    /user/details would always fail, as it requires the read_prefs scope.
     """
     if not os.path.exists(TOKEN_FILE):
         return None
@@ -371,42 +376,17 @@ def load_saved_token():
             token = f.read().strip()
     except OSError:
         return None  # Unreadable token file: authorize again
-    if not token:
-        return None
-
-    # Test if token is valid
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "User-Agent": USER_AGENT,
-    }
-    try:
-        response = requests.get(
-            f"{OSM_API_URL}/api/0.6/user/details.json",
-            headers=headers,
-            timeout=API_TIMEOUT,
-        )
-    except requests.RequestException as e:
-        print(f"❌ Cannot reach OpenStreetMap: {e}")
-        sys.exit(1)
-
-    if response.status_code == 200:
-        print("✅ Valid existing token found")
-        return token
-    # Only a rejected token calls for a new authorization
-    if response.status_code not in (401, 403):
-        print(f"❌ OpenStreetMap unavailable (code: {response.status_code})")
-        sys.exit(1)
-    print("⚠️  Existing token invalid, new authorization required")
-    return None
+    return token or None
 
 
-def get_access_token(client_id, client_secret, auth_code_param=None):
+def get_access_token(client_id, client_secret, auth_code_param=None, use_saved=True):
     """Exchange authorization code for an access token"""
 
     # Check if we already have a saved token
-    if auth_code_param is None:
+    if auth_code_param is None and use_saved:
         token = load_saved_token()
         if token:
+            print("🔑 Using saved token")
             return token
 
     # If no code provided, get one
@@ -632,6 +612,8 @@ def get_existing_traces(access_token):
         }
         response = requests.get(url, headers=headers, timeout=API_TIMEOUT)
 
+        if response.status_code in (401, 403):
+            raise TokenRejectedError(f"code: {response.status_code}")
         if response.status_code != 200:
             print(f"❌ Error retrieving traces: {response.status_code}")
             return None
@@ -658,9 +640,32 @@ def get_existing_traces(access_token):
 
         return trace_names
 
+    except TokenRejectedError:
+        raise
     except Exception as e:
         print(f"❌ Error retrieving traces: {e}")
         return None
+
+
+def fetch_existing_traces(config, access_token):
+    """Existing trace names, authorizing again once if OSM rejects the token
+
+    Returns (access_token, trace names or None): the token may have changed.
+    """
+    try:
+        return access_token, get_existing_traces(access_token)
+    except TokenRejectedError as e:
+        print(f"⚠️  Saved token rejected ({e}), new authorization required")
+
+    access_token = get_access_token(
+        config["client_id"], config["client_secret"], use_saved=False
+    )
+    try:
+        return access_token, get_existing_traces(access_token)
+    except TokenRejectedError as e:
+        print(f"❌ New token rejected too ({e})")
+        print("   Check that the OSM application may 'Read user GPS traces'.")
+        return access_token, None
 
 
 def retry_delay(response, attempt):
@@ -764,7 +769,7 @@ def main():
 
     # Retrieve existing traces
     print("\n🔍 Retrieving existing traces...")
-    existing_traces = get_existing_traces(access_token)
+    access_token, existing_traces = fetch_existing_traces(config, access_token)
     if existing_traces is None:
         print("   Nothing uploaded: without this list, duplicates cannot be detected.")
         sys.exit(1)

@@ -183,12 +183,13 @@ The script stores the date/time it extracted from each GPX file in `osm_gpx_cach
 
 ## 🔧 Troubleshooting
 
-### Token is invalid every time
+### Authorization is asked again
 
-Delete the `osm_token.txt` file from the configuration directory (see [Files location](#files-location)) and restart. On Linux:
+The script reuses the saved token. When OpenStreetMap rejects it (revoked, or created without the GPS traces permissions), the script asks for a new authorization once and saves the new token. If the new token is rejected too, check the application permissions (see below).
+
+To force a new authorization, delete `osm_token.txt` from the configuration directory (see [Files location](#files-location)). On Linux:
 ```bash
 rm ~/.config/osm-gpx-uploader/osm_token.txt
-python OSM-GPX-Uploader.py traces
 ```
 
 ### Error 403 when retrieving traces
@@ -325,6 +326,7 @@ Made with ❤️ for the OpenStreetMap community
 
 | Version | Date       | Changes                                               |
 |---------|------------|-------------------------------------------------------|
+| 1.2.1   | 2026-10-07 | Explain when authorization is asked again             |
 | 1.2.0   | 2026-10-07 | Document how duplicates are detected and their limits |
 | 1.1.0   | 2026-10-07 | Add files location section for user directories       |
 | 1.0.2   | 2026-10-07 | Require Python 3.10 or higher                         |

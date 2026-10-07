@@ -476,22 +476,15 @@ class TestOAuthFlow:
             assert token == "new_token"
 
     @patch("requests.get")
-    @patch("builtins.open", new_callable=mock_open, read_data="invalid_token")
-    @patch("os.path.exists", return_value=True)
-    @patch.object(
-        uploader, "get_authorization_code", return_value=("new_code", "verifier")
-    )
-    @patch("requests.post")
-    def test_get_access_token_existing_invalid(
-        self, mock_post, mock_auth, mock_exists, mock_file, mock_get
+    @patch.object(uploader, "get_authorization_code")
+    def test_get_access_token_saved_token_is_not_checked(
+        self, mock_auth, mock_get, tmp_path
     ):
-        """Test avec un token invalide existant"""
-        mock_get.return_value.status_code = 401
-        mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = {"access_token": "new_token"}
-
-        token = uploader.get_access_token("client_id", "client_secret")
-        assert token == "new_token"
+        """Test que le token enregistré est utilisé sans requête de vérification"""
+        (tmp_path / uploader.TOKEN_FILE).write_text("saved_token")
+        assert uploader.get_access_token("client_id", "client_secret") == "saved_token"
+        mock_get.assert_not_called()
+        mock_auth.assert_not_called()
 
     @patch("requests.post")
     @patch("builtins.open", new_callable=mock_open)
@@ -550,11 +543,19 @@ class TestTraceManagement:
         traces = uploader.get_existing_traces("test_token")
         assert len(traces) == 0
 
+    @pytest.mark.parametrize("status", [401, 403])
+    @patch("requests.get")
+    def test_get_existing_traces_token_rejected(self, mock_get, status):
+        """Test qu'un token refusé est signalé, pas confondu avec une panne"""
+        mock_get.return_value = Mock(status_code=status)
+        with pytest.raises(uploader.TokenRejectedError):
+            uploader.get_existing_traces("test_token")
+
     @patch("requests.get")
     def test_get_existing_traces_error(self, mock_get):
         """Test erreur API"""
         mock_response = Mock()
-        mock_response.status_code = 403
+        mock_response.status_code = 500
         mock_get.return_value = mock_response
 
         assert uploader.get_existing_traces("test_token") is None
@@ -964,53 +965,82 @@ class TestUploadRetry:
 
 
 class TestTokenCheck:
-    """Tests : seul un token refusé relance l'autorisation OAuth"""
+    """Tests : la liste des traces valide le token ; seul un refus relance OAuth"""
 
-    @pytest.fixture
-    def saved_token(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / uploader.TOKEN_FILE).write_text("token")
+    CONFIG = {"client_id": "id", "client_secret": "secret"}
 
-    @patch.object(uploader, "get_authorization_code")
+    @patch.object(uploader, "get_access_token", return_value="new")
     @patch("requests.get", return_value=Mock(status_code=503))
-    def test_server_error_exits_without_browser(self, mock_get, mock_auth, saved_token):
-        with pytest.raises(SystemExit):
-            uploader.get_access_token("id", "secret")
-        mock_auth.assert_not_called()
+    def test_server_error_stops_without_browser(self, mock_get, mock_token):
+        token, traces = uploader.fetch_existing_traces(self.CONFIG, "saved")
+        assert (token, traces) == ("saved", None)
+        mock_token.assert_not_called()
 
-    @patch.object(uploader, "get_authorization_code")
+    @patch.object(uploader, "get_access_token", return_value="new")
     @patch("requests.get", side_effect=uploader.requests.ConnectionError("offline"))
-    def test_network_error_exits_without_browser(
-        self, mock_get, mock_auth, saved_token, capsys
-    ):
-        with pytest.raises(SystemExit):
-            uploader.get_access_token("id", "secret")
-        mock_auth.assert_not_called()
-        assert "Cannot reach OpenStreetMap: offline" in capsys.readouterr().out
+    def test_network_error_stops_without_browser(self, mock_get, mock_token, capsys):
+        token, traces = uploader.fetch_existing_traces(self.CONFIG, "saved")
+        assert traces is None
+        mock_token.assert_not_called()
+        assert "offline" in capsys.readouterr().out
+
+    @patch.object(uploader, "get_access_token", return_value="new")
+    @patch("requests.get")
+    def test_rejected_token_authorizes_again(self, mock_get, mock_token):
+        accepted = Mock(status_code=200)
+        accepted.json.return_value = {
+            "traces": [{"description": "20231122 - 14:04 - x"}]
+        }
+        mock_get.side_effect = [Mock(status_code=403), accepted]
+        token, traces = uploader.fetch_existing_traces(self.CONFIG, "saved")
+        assert (token, traces) == ("new", {"20231122 - 14:04"})
+        mock_token.assert_called_once_with("id", "secret", use_saved=False)
+        assert mock_get.call_args.kwargs["headers"]["Authorization"] == "Bearer new"
+
+    @patch.object(uploader, "get_access_token", return_value="new")
+    @patch("requests.get", return_value=Mock(status_code=403))
+    def test_rejected_twice_stops(self, mock_get, mock_token, capsys):
+        token, traces = uploader.fetch_existing_traces(self.CONFIG, "saved")
+        assert traces is None
+        assert mock_token.call_count == 1
+        assert "Read user GPS traces" in capsys.readouterr().out
 
     @patch("requests.post")
     @patch.object(uploader, "get_authorization_code", return_value=("code", "verifier"))
-    @patch("requests.get", return_value=Mock(status_code=401))
-    def test_rejected_token_authorizes_again(
-        self, mock_get, mock_auth, mock_post, saved_token
+    def test_new_authorization_ignores_saved_token(
+        self, mock_auth, mock_post, tmp_path
     ):
+        (tmp_path / uploader.TOKEN_FILE).write_text("saved")
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.json.return_value = {"access_token": "new"}
+        assert uploader.get_access_token("id", "secret", use_saved=False) == "new"
+        assert (tmp_path / uploader.TOKEN_FILE).read_text() == "new"
+
+    @patch("requests.post")
+    @patch.object(uploader, "get_authorization_code", return_value=("code", "verifier"))
+    def test_empty_token_file_authorizes_again(self, mock_auth, mock_post, tmp_path):
+        (tmp_path / uploader.TOKEN_FILE).write_text("")
         mock_post.return_value = Mock(status_code=200)
         mock_post.return_value.json.return_value = {"access_token": "new"}
         assert uploader.get_access_token("id", "secret") == "new"
         mock_auth.assert_called_once()
 
-    @patch("requests.post")
-    @patch.object(uploader, "get_authorization_code", return_value=("code", "verifier"))
+    @patch.object(uploader, "upload_gpx", return_value=True)
+    @patch.object(uploader, "get_access_token", side_effect=["saved", "new"])
+    @patch.object(uploader, "load_or_create_config", return_value=CONFIG)
     @patch("requests.get")
-    def test_empty_token_file_authorizes_again(
-        self, mock_get, mock_auth, mock_post, tmp_path, monkeypatch
+    def test_main_uploads_with_the_new_token(
+        self, mock_get, mock_config, mock_token, mock_upload, tmp_path
     ):
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / uploader.TOKEN_FILE).write_text("")
-        mock_post.return_value = Mock(status_code=200)
-        mock_post.return_value.json.return_value = {"access_token": "new"}
-        assert uploader.get_access_token("id", "secret") == "new"
-        mock_get.assert_not_called()
+        accepted = Mock(status_code=200)
+        accepted.json.return_value = {"traces": []}
+        mock_get.side_effect = [Mock(status_code=401), accepted]
+        gpx_dir = tmp_path / "gpx"
+        gpx_dir.mkdir()
+        write_gpx_files(gpx_dir, 1)
+        with patch("sys.argv", ["script.py", str(gpx_dir)]):
+            uploader.main()
+        assert mock_upload.call_args.args[0] == "new"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="permissions POSIX")
@@ -1202,14 +1232,6 @@ class TestAuthorizationFlow:
 
 class TestNetworkTimeouts:
     """Tests que chaque appel réseau a un délai maximal"""
-
-    @patch("requests.get")
-    def test_token_check_has_timeout(self, mock_get, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / uploader.TOKEN_FILE).write_text("token")
-        mock_get.return_value = Mock(status_code=200)
-        uploader.get_access_token("id", "secret")
-        assert mock_get.call_args.kwargs["timeout"] == uploader.API_TIMEOUT
 
     @patch("requests.post")
     def test_token_exchange_has_timeout(self, mock_post, tmp_path, monkeypatch):
