@@ -628,7 +628,13 @@ def main():
         sys.exit(1)
 
     # Find all GPX files
-    gpx_files = list(directory.glob("*.gpx")) + list(directory.glob("*.GPX"))
+    # One pass with a case-insensitive suffix: globbing "*.gpx" then "*.GPX"
+    # lists every file twice where matching ignores case (Windows)
+    gpx_files = [
+        path
+        for path in directory.iterdir()
+        if path.suffix.lower() == ".gpx" and path.is_file()
+    ]
 
     if not gpx_files:
         print(f"❌ No GPX files found in '{directory}'")

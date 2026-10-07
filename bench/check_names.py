@@ -31,7 +31,10 @@ def load_uploader():
 def trace_names(gpx_dir):
     uploader = load_uploader()
     names = {}
-    for gpx_file in sorted(gpx_dir.glob("*.gpx")) + sorted(gpx_dir.glob("*.GPX")):
+    gpx_files = [
+        p for p in gpx_dir.iterdir() if p.suffix.lower() == ".gpx" and p.is_file()
+    ]
+    for gpx_file in sorted(gpx_files):
         with redirect_stdout(StringIO()):
             timestamp = uploader.extract_gpx_timestamp(gpx_file)
         if timestamp is None:

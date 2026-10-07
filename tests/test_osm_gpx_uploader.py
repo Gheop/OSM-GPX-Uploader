@@ -510,7 +510,7 @@ class TestMainWorkflow:
     @patch.object(uploader, "get_existing_traces", return_value={"20231122 - 14:04"})
     @patch.object(uploader, "get_access_token", return_value="test_token")
     @patch.object(uploader, "load_or_create_config")
-    @patch("pathlib.Path.glob")
+    @patch("pathlib.Path.iterdir")
     @patch("pathlib.Path.exists", return_value=True)
     @patch("pathlib.Path.is_dir", return_value=True)
     @patch("sys.argv", ["script.py", "test_dir"])
@@ -518,7 +518,7 @@ class TestMainWorkflow:
         self,
         mock_is_dir,
         mock_exists,
-        mock_glob,
+        mock_iterdir,
         mock_config,
         mock_token,
         mock_traces,
@@ -536,6 +536,7 @@ class TestMainWorkflow:
         # Create proper mock with comparison support using MagicMock
         mock_gpx = MagicMock(spec=Path)
         mock_gpx.name = "test.gpx"
+        mock_gpx.suffix = ".gpx"
         mock_stat = MagicMock()
         mock_stat.st_mtime = 1700000000.0
         mock_gpx.stat.return_value = mock_stat
@@ -547,7 +548,7 @@ class TestMainWorkflow:
         mock_gpx.__le__ = MagicMock(return_value=True)
         mock_gpx.__ge__ = MagicMock(return_value=True)
 
-        mock_glob.return_value = [mock_gpx]
+        mock_iterdir.return_value = [mock_gpx]
 
         with patch.object(
             uploader,
@@ -565,7 +566,7 @@ class TestMainWorkflow:
     @patch.object(uploader, "get_existing_traces", return_value=set())
     @patch.object(uploader, "get_access_token", return_value="test_token")
     @patch.object(uploader, "load_or_create_config")
-    @patch("pathlib.Path.glob")
+    @patch("pathlib.Path.iterdir")
     @patch("pathlib.Path.exists", return_value=True)
     @patch("pathlib.Path.is_dir", return_value=True)
     @patch("sys.argv", ["script.py", "test_dir"])
@@ -573,7 +574,7 @@ class TestMainWorkflow:
         self,
         mock_is_dir,
         mock_exists,
-        mock_glob,
+        mock_iterdir,
         mock_config,
         mock_token,
         mock_traces,
@@ -590,6 +591,7 @@ class TestMainWorkflow:
 
         mock_gpx = MagicMock(spec=Path)
         mock_gpx.name = "test.gpx"
+        mock_gpx.suffix = ".gpx"
         mock_stat = MagicMock()
         mock_stat.st_mtime = 1700000000.0
         mock_gpx.stat.return_value = mock_stat
@@ -599,7 +601,7 @@ class TestMainWorkflow:
         mock_gpx.__le__ = MagicMock(return_value=True)
         mock_gpx.__ge__ = MagicMock(return_value=True)
 
-        mock_glob.return_value = [mock_gpx]
+        mock_iterdir.return_value = [mock_gpx]
 
         with patch.object(
             uploader,
@@ -617,7 +619,7 @@ class TestMainWorkflow:
     @patch.object(uploader, "get_existing_traces", return_value=set())
     @patch.object(uploader, "get_access_token", return_value="test_token")
     @patch.object(uploader, "load_or_create_config")
-    @patch("pathlib.Path.glob")
+    @patch("pathlib.Path.iterdir")
     @patch("pathlib.Path.exists", return_value=True)
     @patch("pathlib.Path.is_dir", return_value=True)
     @patch("sys.argv", ["script.py", "test_dir"])
@@ -625,7 +627,7 @@ class TestMainWorkflow:
         self,
         mock_is_dir,
         mock_exists,
-        mock_glob,
+        mock_iterdir,
         mock_config,
         mock_token,
         mock_traces,
@@ -642,6 +644,7 @@ class TestMainWorkflow:
 
         mock_gpx = MagicMock(spec=Path)
         mock_gpx.name = "test.gpx"
+        mock_gpx.suffix = ".gpx"
         mock_stat = MagicMock()
         mock_stat.st_mtime = 1700000000.0
         mock_gpx.stat.return_value = mock_stat
@@ -651,7 +654,7 @@ class TestMainWorkflow:
         mock_gpx.__le__ = MagicMock(return_value=True)
         mock_gpx.__ge__ = MagicMock(return_value=True)
 
-        mock_glob.return_value = [mock_gpx]
+        mock_iterdir.return_value = [mock_gpx]
 
         with patch.object(uploader, "extract_gpx_timestamp", return_value=None):
             try:
@@ -696,11 +699,13 @@ class TestMainWorkflow:
             uploader.main()
 
     @patch.object(uploader, "load_or_create_config")
-    @patch("pathlib.Path.glob", return_value=[])
+    @patch("pathlib.Path.iterdir", return_value=[])
     @patch("pathlib.Path.exists", return_value=True)
     @patch("pathlib.Path.is_dir", return_value=True)
     @patch("sys.argv", ["script.py", "empty_dir"])
-    def test_main_no_gpx_files(self, mock_is_dir, mock_exists, mock_glob, mock_config):
+    def test_main_no_gpx_files(
+        self, mock_is_dir, mock_exists, mock_iterdir, mock_config
+    ):
         """Test sans fichiers GPX"""
         mock_config.return_value = {
             "client_id": "test",
@@ -711,6 +716,39 @@ class TestMainWorkflow:
         }
         with pytest.raises(SystemExit):
             uploader.main()
+
+
+class TestGpxFileListing:
+    """Tests de la liste des fichiers GPX d'un répertoire"""
+
+    @patch.object(uploader, "upload_gpx", return_value=True)
+    @patch.object(uploader, "get_existing_traces", return_value=set())
+    @patch.object(uploader, "get_access_token", return_value="token")
+    @patch.object(
+        uploader,
+        "load_or_create_config",
+        return_value={"client_id": "i", "client_secret": "s"},
+    )
+    def test_each_gpx_file_once_whatever_the_case(
+        self, mock_config, mock_token, mock_traces, mock_upload, tmp_path
+    ):
+        for name in ("a.gpx", "b.GPX", "c.Gpx", "notes.txt"):
+            (tmp_path / name).write_text("<gpx/>")
+        (tmp_path / "folder.gpx").mkdir()
+        listed = []
+
+        def fake_extract(gpx_files):
+            listed.extend(path.name for path in gpx_files)
+            return [
+                (datetime(2023, 11, 22, 14, minute), "")
+                for minute in range(len(gpx_files))
+            ]
+
+        with patch.object(
+            uploader, "extract_timestamps_cached", side_effect=fake_extract
+        ), patch("sys.argv", ["script.py", str(tmp_path)]):
+            uploader.main()
+        assert listed == ["a.gpx", "b.GPX", "c.Gpx"]
 
 
 class TestTokenCheck:
