@@ -37,6 +37,12 @@ REDIRECT_URI = "http://127.0.0.1:8000/callback"  # Do not modify
 API_TIMEOUT = 30
 # (connect, read): OSM processes the whole GPX file before answering
 UPLOAD_TIMEOUT = (30, 300)
+# Only these answers guarantee that OSM did not store the trace: retrying
+# after a timeout or another error could upload it twice
+RETRY_STATUSES = (429, 503)
+UPLOAD_ATTEMPTS = 3
+# Seconds; a longer wait asked by OSM fails the file instead of blocking the run
+MAX_RETRY_DELAY = 300
 
 # Below this many files, starting worker processes costs more than it saves
 PARALLEL_MIN_FILES = 16
@@ -607,29 +613,50 @@ def get_existing_traces(access_token):
         return None
 
 
+def retry_delay(response, attempt):
+    """Seconds to wait before retrying, or None to give up"""
+    retry_after = response.headers.get("Retry-After", "")
+    # Retry-After may also be an HTTP date: fall back to our own backoff then
+    delay = int(retry_after) if retry_after.isdigit() else 10 * 2 ** (attempt - 1)
+    return delay if delay <= MAX_RETRY_DELAY else None
+
+
+def post_gpx(access_token, gpx_file, data):
+    """Send one upload request; the file is reopened for each attempt"""
+    url = f"{OSM_API_URL}/api/0.6/gpx/create"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": USER_AGENT,
+    }
+    with open(gpx_file, "rb") as f:
+        files = {"file": (gpx_file.name, f, "application/gpx+xml")}
+        return requests.post(
+            url, files=files, data=data, headers=headers, timeout=UPLOAD_TIMEOUT
+        )
+
+
 def upload_gpx(access_token, gpx_file, trace_name, config):
     """Upload a GPX file to OpenStreetMap"""
     try:
-        url = f"{OSM_API_URL}/api/0.6/gpx/create"
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "User-Agent": USER_AGENT,
+        # Put formatted name directly in description
+        data = {
+            "description": f"{trace_name} - {config['description']}",
+            "tags": config["tags"],
+            "visibility": config["visibility"],
         }
 
-        description = f"{trace_name} - {config['description']}"
-
-        with open(gpx_file, "rb") as f:
-            files = {"file": (gpx_file.name, f, "application/gpx+xml")}
-            # Put formatted name directly in description
-            data = {
-                "description": description,
-                "tags": config["tags"],
-                "visibility": config["visibility"],
-            }
-
-            response = requests.post(
-                url, files=files, data=data, headers=headers, timeout=UPLOAD_TIMEOUT
+        for attempt in range(1, UPLOAD_ATTEMPTS + 1):
+            response = post_gpx(access_token, gpx_file, data)
+            if response.status_code not in RETRY_STATUSES or attempt == UPLOAD_ATTEMPTS:
+                break
+            delay = retry_delay(response, attempt)
+            if delay is None:
+                break
+            print(
+                f"  ⏳ OpenStreetMap busy (code: {response.status_code}), "
+                f"retrying in {delay} s"
             )
+            time.sleep(delay)
 
         if response.status_code in [200, 201]:
             trace_id = response.text.strip()

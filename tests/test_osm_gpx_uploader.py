@@ -779,6 +779,88 @@ class TestGpxFileListing:
         assert listed == ["a.gpx", "b.GPX", "c.Gpx"]
 
 
+def osm_response(status, retry_after=None):
+    """Réponse de l'API OSM, avec un en-tête Retry-After éventuel"""
+    headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    return Mock(status_code=status, text="42", headers=headers)
+
+
+class TestUploadRetry:
+    """Tests : seuls 429 et 503 relancent l'upload, car OSM n'a rien enregistré"""
+
+    CONFIG = {"description": "d", "tags": "t", "visibility": "private"}
+
+    @pytest.fixture
+    def gpx_file(self, tmp_path):
+        gpx_file = tmp_path / "trace.gpx"
+        gpx_file.write_text("<gpx>content</gpx>")
+        return gpx_file
+
+    def upload(self, gpx_file, responses):
+        """Upload avec des réponses successives ; renvoie (résultat, post, sleep)"""
+        sent = []
+
+        def post(url, files, **kwargs):
+            sent.append(files["file"][1].read())
+            return responses.pop(0)
+
+        with patch("requests.post", side_effect=post) as mock_post, patch.object(
+            uploader.time, "sleep"
+        ) as mock_sleep:
+            result = uploader.upload_gpx(
+                "token", gpx_file, "20231122 - 14:04", self.CONFIG
+            )
+        assert all(body == b"<gpx>content</gpx>" for body in sent)
+        return result, mock_post, mock_sleep
+
+    def test_retry_after_429_honours_retry_after(self, gpx_file):
+        result, post, sleep = self.upload(
+            gpx_file, [osm_response(429, "5"), osm_response(201)]
+        )
+        assert result is True
+        assert post.call_count == 2
+        sleep.assert_called_once_with(5)
+
+    def test_503_without_retry_after_backs_off(self, gpx_file):
+        result, post, sleep = self.upload(gpx_file, [osm_response(503)] * 3)
+        assert result is False
+        assert post.call_count == uploader.UPLOAD_ATTEMPTS
+        assert [c.args[0] for c in sleep.call_args_list] == [10, 20]
+
+    def test_http_date_retry_after_uses_backoff(self, gpx_file):
+        responses = [
+            osm_response(503, "Wed, 21 Oct 2026 07:28:00 GMT"),
+            osm_response(200),
+        ]
+        result, post, sleep = self.upload(gpx_file, responses)
+        assert result is True
+        sleep.assert_called_once_with(10)
+
+    def test_too_long_retry_after_gives_up(self, gpx_file):
+        result, post, sleep = self.upload(gpx_file, [osm_response(429, "3600")])
+        assert result is False
+        assert post.call_count == 1
+        sleep.assert_not_called()
+
+    @pytest.mark.parametrize("status", [400, 500, 502])
+    def test_other_errors_are_not_retried(self, gpx_file, status):
+        result, post, sleep = self.upload(gpx_file, [osm_response(status)])
+        assert result is False
+        assert post.call_count == 1
+
+    def test_timeout_is_not_retried(self, gpx_file):
+        """Après un délai dépassé, OSM a pu enregistrer la trace : pas de doublon"""
+        with patch(
+            "requests.post", side_effect=uploader.requests.Timeout
+        ) as post, patch.object(uploader.time, "sleep") as sleep:
+            assert (
+                uploader.upload_gpx("token", gpx_file, "20231122 - 14:04", self.CONFIG)
+                is False
+            )
+        assert post.call_count == 1
+        sleep.assert_not_called()
+
+
 class TestTokenCheck:
     """Tests : seul un token refusé relance l'autorisation OAuth"""
 
