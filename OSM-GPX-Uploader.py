@@ -6,8 +6,12 @@ Uses OAuth 2.0 authentication
 
 import os
 import sys
+import io
 import json
 import re
+from contextlib import redirect_stdout
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +29,11 @@ USER_AGENT = "OSM-GPX-Uploader/1.0 (https://github.com/Gheop/OSM-GPX-Uploader)"
 OSM_WEB_URL = "https://www.openstreetmap.org"  # For OAuth
 OSM_API_URL = "https://api.openstreetmap.org"  # For GPX API
 REDIRECT_URI = "http://127.0.0.1:8000/callback"  # Do not modify
+
+# Below this many files, starting worker processes costs more than it saves
+PARALLEL_MIN_FILES = 16
+# Each worker holds a full GPX tree in memory: cap the total footprint
+MAX_WORKERS = 8
 
 # Configuration files
 CONFIG_FILE = "osm_config.json"
@@ -294,6 +303,33 @@ def extract_gpx_timestamp(gpx_file):
         return None
 
 
+def extract_with_messages(gpx_file):
+    """Run extract_gpx_timestamp, returning its printed messages with the result
+
+    Workers cannot print directly: their output would interleave out of order.
+    """
+    messages = io.StringIO()
+    with redirect_stdout(messages):
+        timestamp = extract_gpx_timestamp(gpx_file)
+    return timestamp, messages.getvalue()
+
+
+def extract_all_timestamps(gpx_files):
+    """Extract timestamps of all files, in worker processes when worth it
+
+    Returns a list of (timestamp, messages) in the order of gpx_files.
+    """
+    if len(gpx_files) >= PARALLEL_MIN_FILES:
+        workers = min(os.cpu_count() or 1, MAX_WORKERS)
+        try:
+            with ProcessPoolExecutor(workers) as executor:
+                return list(executor.map(extract_with_messages, gpx_files, chunksize=4))
+        except (OSError, NotImplementedError, BrokenProcessPool):
+            pass  # No usable multiprocessing here: fall back to sequential
+
+    return [extract_with_messages(gpx_file) for gpx_file in gpx_files]
+
+
 def format_trace_name(dt):
     """Format trace name according to YYYYMMDD - hh:mm format"""
     return dt.strftime("%Y%m%d - %H:%M")
@@ -416,11 +452,12 @@ def main():
     skipped = 0
     errors = 0
 
-    for gpx_file in sorted(gpx_files):
-        print(f"📄 {gpx_file.name}")
+    gpx_files = sorted(gpx_files)
+    extracted = extract_all_timestamps(gpx_files)
 
-        # Extract timestamp
-        timestamp = extract_gpx_timestamp(gpx_file)
+    for gpx_file, (timestamp, messages) in zip(gpx_files, extracted):
+        print(f"📄 {gpx_file.name}")
+        print(messages, end="")
 
         if timestamp is None:
             print("  ⚠️  No timestamp found, using file modification date")

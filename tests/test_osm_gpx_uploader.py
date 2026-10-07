@@ -2,6 +2,7 @@
 """Tests unitaires pour OSM-GPX-Uploader"""
 import pytest
 import json
+import re
 import tempfile
 import os
 import importlib.util
@@ -416,6 +417,90 @@ class TestEdgeCases:
         traces = uploader.get_existing_traces('test_token')
         assert len(traces) == 0
 
+
+
+def write_gpx_files(directory, count):
+    """Écrit count fichiers GPX minimaux, un par minute à partir de 14:00"""
+    for minute in range(count):
+        (directory / f"trace_{minute:02d}.gpx").write_text(
+            '<?xml version="1.0"?>'
+            '<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">'
+            f'<trk><trkseg><trkpt lat="0" lon="0"><time>2023-11-22T14:{minute:02d}:00Z</time>'
+            '</trkpt></trkseg></trk></gpx>'
+        )
+    return sorted(directory.glob("*.gpx"))
+
+
+class TestParallelExtraction:
+    """Tests pour l'extraction des timestamps en processus séparés"""
+
+    def test_extract_with_messages_captures_warning(self, tmp_path):
+        """Test que le message d'erreur est renvoyé au lieu d'être affiché"""
+        broken = tmp_path / "broken.gpx"
+        broken.write_text("not xml")
+        timestamp, messages = uploader.extract_with_messages(broken)
+        assert timestamp is None
+        assert "Error extracting timestamp" in messages
+
+    def test_extract_all_timestamps_sequential_below_threshold(self, tmp_path):
+        """Test qu'aucun processus n'est lancé pour peu de fichiers"""
+        files = write_gpx_files(tmp_path, 3)
+        with patch.object(uploader, 'ProcessPoolExecutor', side_effect=AssertionError):
+            results = uploader.extract_all_timestamps(files)
+        assert [ts.minute for ts, _ in results] == [0, 1, 2]
+
+    def test_extract_all_timestamps_falls_back_without_multiprocessing(self, tmp_path):
+        """Test le repli séquentiel quand les processus sont indisponibles"""
+        files = write_gpx_files(tmp_path, uploader.PARALLEL_MIN_FILES)
+        with patch.object(uploader, 'ProcessPoolExecutor', side_effect=OSError):
+            results = uploader.extract_all_timestamps(files)
+        assert [ts.minute for ts, _ in results] == list(range(uploader.PARALLEL_MIN_FILES))
+
+    def test_main_parallel_keeps_order_and_messages(self, tmp_path, monkeypatch, capsys):
+        """Test de bout en bout : workers réels, sortie dans l'ordre des fichiers"""
+        gpx_dir = tmp_path / "gpx"
+        gpx_dir.mkdir()
+        write_gpx_files(gpx_dir, 20)
+        (gpx_dir / "trace_99_broken.gpx").write_text("not xml")
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "osm_config.json").write_text(json.dumps({
+            'client_id': 'id', 'client_secret': 'secret',
+            'description': 'Test', 'tags': 'test', 'visibility': 'private',
+        }))
+        (tmp_path / "osm_token.txt").write_text("token")
+        response = Mock(status_code=200)
+        response.json.return_value = {'traces': [
+            {'description': f'20231122 - 14:{minute:02d} - Test'} for minute in range(20)
+        ]}
+        script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "OSM-GPX-Uploader.py")
+
+        from concurrent.futures import ProcessPoolExecutor
+
+        class RecordingPool(ProcessPoolExecutor):
+            """Retient que les workers ont réellement produit les résultats"""
+            completed = False
+
+            def map(self, *args, **kwargs):
+                results = list(super().map(*args, **kwargs))
+                RecordingPool.completed = True
+                return iter(results)
+
+        # Run as __main__ so that worker processes can re-import the script
+        import runpy
+        import requests
+        with patch('concurrent.futures.ProcessPoolExecutor', RecordingPool), \
+                patch.object(requests, 'get', return_value=response), \
+                patch.object(requests, 'post', side_effect=AssertionError("unexpected upload")), \
+                patch('sys.argv', [script, str(gpx_dir)]):
+            runpy.run_path(script, run_name='__main__')
+
+        assert RecordingPool.completed
+        output = capsys.readouterr().out
+        names = re.findall(r"📅 Date/time: (.+)", output)
+        assert names[:20] == [f"20231122 - 14:{minute:02d}" for minute in range(20)]
+        broken_block = output.split("📄 trace_99_broken.gpx\n")[1]
+        assert broken_block.startswith("  ⚠️  Error extracting timestamp")
+        assert "Skipped (already present): 20" in output
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
